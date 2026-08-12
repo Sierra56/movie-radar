@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ru">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Настройки Telegram</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+        }
+
+        body {
+            background: #10131a;
+            color: #e9ecf3;
+            font: 16px/1.4 system-ui, sans-serif;
+            padding: 24px;
+            max-width: 700px;
+            margin: auto;
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-bottom: 16px;
+        }
+
+        .message {
+            color: #7bd88f;
+            margin-bottom: 16px;
+        }
+
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        label {
+            font-size: 14px;
+            color: #9aa3b8;
+            margin-bottom: 4px;
+            display: block;
+        }
+
+        input,
+        select {
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid #2a3140;
+            background: #1a1f2b;
+            color: inherit;
+            font-size: 15px;
+        }
+
+        input[type=checkbox] {
+            width: 20px;
+            height: 20px;
+        }
+
+        .check-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        button {
+            padding: 10px 18px;
+            border: 0;
+            border-radius: 8px;
+            background: #4f8cff;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #3a78eb;
+        }
+
+        button.secondary {
+            background: #2a3140;
+        }
+
+        button.secondary:hover {
+            background: #343d4f;
+        }
+
+        .btn-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .hint {
+            font-size: 13px;
+            color: #6a7389;
+            margin-top: 4px;
+        }
+
+        .back {
+            display: inline-block;
+            margin-bottom: 16px;
+            color: #4f8cff;
+            text-decoration: none;
+        }
+
+        .back:hover {
+            text-decoration: underline;
+        }
+
+        .field {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .last-sent {
+            font-size: 13px;
+            color: #6a7389;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+
+<body>
+    <a class="back" href="/">← Назад</a>
+    <h1>🔔 Настройки Telegram</h1>
+    {% if message %}<p class="message">{{ message }}</p>{% endif %}
+
+    <form method="post" action="/settings/telegram">
+        <div class="field">
+            <label>Bot Token (от @BotFather)</label>
+            <input type="password" name="bot_token" value="{{ tg.get('bot_token', '') }}"
+                placeholder="123456:ABC-DEF...">
+            <p class="hint">Создайте бота через @BotFather и скопируйте токен.</p>
+        </div>
+
+        <div class="field">
+            <label>Chat ID</label>
+            <input type="text" name="chat_id" value="{{ tg.get('chat_id', '') }}" placeholder="123456789">
+            <p class="hint">Узнайте свой ID через @userinfobot или @getmyid_bot.</p>
+        </div>
+
+        <div class="check-row">
+            <input type="checkbox" name="enabled" id="enabled" {% if tg.get('enabled') %}checked{% endif %}>
+            <label for="enabled" style="margin:0">Включить уведомления о релизах</label>
+        </div>
+
+        <div class="check-row">
+            <input type="checkbox" name="notify_date_changes" id="notify_date_changes" {% if
+                tg.get('notify_date_changes', 1) %}checked{% endif %}>
+            <label for="notify_date_changes" style="margin:0">Уведомлять о переносе дат</label>
+        </div>
+
+        <div class="check-row">
+            <input type="checkbox" name="notify_new_cards" id="notify_new_cards" {% if tg.get('notify_new_cards', 1)
+                %}checked{% endif %}>
+            <label for="notify_new_cards" style="margin:0">Уведомлять о новых карточках</label>
+        </div>
+
+        <div class="check-row">
+            <input type="checkbox" name="notify_new_seasons" id="notify_new_seasons" {% if tg.get('notify_new_seasons',
+                1) %}checked{% endif %}>
+            <label for="notify_new_seasons" style="margin:0">Уведомлять о новых сезонах</label>
+        </div>
+
+        <div class="check-row">
+            <input type="checkbox" name="notify_new_episodes" id="notify_new_episodes" {% if
+                tg.get('notify_new_episodes', 1) %}checked{% endif %}>
+            <label for="notify_new_episodes" style="margin:0">Уведомлять о новых эпизодах</label>
+        </div>
+
+        <div class="field">
+            <label>Время отправки</label>
+            <input type="time" name="send_time" value="{{ tg.get('send_time', '09:00') }}">
+        </div>
+
+        <div class="field">
+            <label>Уведомлять за сколько дней до релиза</label>
+            <select name="notify_days">
+                <option value="0" {% if tg.get('notify_days')==0 %}selected{% endif %}>только в день релиза</option>
+                <option value="1" {% if tg.get('notify_days')==1 %}selected{% endif %}>за 1 день (сегодня и завтра)
+                </option>
+                <option value="3" {% if tg.get('notify_days')==3 %}selected{% endif %}>за 3 дня</option>
+                <option value="7" {% if tg.get('notify_days')==7 %}selected{% endif %}>за неделю</option>
+            </select>
+        </div>
+
+        <div class="btn-row">
+            <button type="submit">Сохранить</button>
+        </div>
+    </form>
+
+    <form method="post" action="/settings/telegram/test" style="margin-top:16px">
+        <button type="submit" class="secondary">Отправить тестовое сообщение</button>
+    </form>
+
+    {% if tg.get('last_sent') %}
+    <p class="last-sent">Последняя отправка: {{ tg['last_sent'] }}</p>
+    {% endif %}
+</body>
+
+</html>

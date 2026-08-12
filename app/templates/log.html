@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ru">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Журнал обновлений</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+        }
+
+        body {
+            background: #10131a;
+            color: #e9ecf3;
+            font: 16px/1.4 system-ui, sans-serif;
+            padding: 24px;
+            max-width: 900px;
+            margin: auto;
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-bottom: 16px;
+        }
+
+        .back {
+            display: inline-block;
+            margin-bottom: 16px;
+            color: #4f8cff;
+            text-decoration: none;
+        }
+
+        .back:hover {
+            text-decoration: underline;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        th,
+        td {
+            padding: 8px 12px;
+            text-align: left;
+            border-bottom: 1px solid #2a3140;
+        }
+
+        th {
+            color: #9aa3b8;
+            font-weight: 600;
+        }
+
+        td.old {
+            color: #ff7b7b;
+        }
+
+        td.new {
+            color: #7bd88f;
+        }
+
+        .empty {
+            color: #9aa3b8;
+            margin-top: 20px;
+        }
+
+        .field-name {
+            background: #1a1f2b;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+
+<body>
+    <a class="back" href="/">← Назад</a>
+    <h1>📋 Журнал обновлений</h1>
+
+    {% if rows %}
+    <table>
+        <thead>
+            <tr>
+                <th>Время</th>
+                <th>Название</th>
+                <th>Поле</th>
+                <th>Было</th>
+                <th>Стало</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr>
+                <td>{{ r.created_at }}</td>
+                <td>{{ r.title }}</td>
+                <td><span class="field-name">{{ r.field }}</span></td>
+                <td class="old">{{ r.old_value or '—' }}</td>
+                <td class="new">{{ r.new_value or '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty">Журнал пуст. Изменения появятся после первого обновления карточек.</p>
+    {% endif %}
+</body>
+
+</html>
