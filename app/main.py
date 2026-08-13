@@ -988,9 +988,9 @@ scheduler.add_job(refresh_catalog, "interval", hours=get_refresh_hours(),
 @app.on_event("startup")
 async def on_startup():
     scheduler.start()
-    scheduler.reschedule_job("refresh", trigger="interval",
-                             hours=get_refresh_hours(),
-                             next_run_time=datetime.now() + timedelta(minutes=5))
+    # Первый запуск через 5 минут после старта
+    scheduler.reschedule_job("refresh", trigger="interval", hours=get_refresh_hours())
+    scheduler.modify_job("refresh", next_run_time=datetime.now() + timedelta(minutes=5))
     schedule_telegram_job()
 
 
