@@ -197,13 +197,37 @@
         </div>
     </form>
 
-    <form method="post" action="/settings/telegram/test" style="margin-top:14px">
-        <button type="submit" class="secondary">📤 Отправить тестовое сообщение</button>
-    </form>
-
     {% if tg.get('last_sent') %}
     <p class="last-sent">Последняя отправка: {{ tg['last_sent'] }}</p>
     {% endif %}
+</div>
+
+<div class="section">
+    <h2>🧪 Тестирование уведомлений</h2>
+    <p style="font-size:13px; color:#9aa3b8; margin-bottom:14px">
+        Отправьте тестовые сообщения каждого типа, чтобы убедиться что всё работает.
+        Тесты отправляются независимо от переключателей уведомлений.
+    </p>
+    <div class="btn-row">
+        <form method="post" action="/settings/telegram/test/simple">
+            <button type="submit" class="secondary small">💬 Простое сообщение</button>
+        </form>
+        <form method="post" action="/settings/telegram/test/date-change">
+            <button type="submit" class="secondary small">📅 Перенос даты</button>
+        </form>
+        <form method="post" action="/settings/telegram/test/new-card">
+            <button type="submit" class="secondary small">🆕 Новая карточка</button>
+        </form>
+        <form method="post" action="/settings/telegram/test/new-season">
+            <button type="submit" class="secondary small">📺 Новый сезон</button>
+        </form>
+        <form method="post" action="/settings/telegram/test/new-episodes">
+            <button type="submit" class="secondary small">🎬 Новый эпизод</button>
+        </form>
+        <form method="post" action="/settings/telegram/test/daily">
+            <button type="submit" class="secondary small">🔔 Ежедневная рассылка</button>
+        </form>
+    </div>
 </div>
 
 <div class="section">

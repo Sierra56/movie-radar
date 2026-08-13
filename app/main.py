@@ -567,11 +567,11 @@ async def send_telegram(text: str) -> bool:
         return False
 
 
-async def notify_date_changes(changes: list[dict]):
+async def notify_date_changes(changes: list[dict], force: bool = False):
     s = get_telegram_settings()
-    if not s or not s.get("enabled") or not s.get("notify_date_changes"):
+    if not force and (not s or not s.get("enabled") or not s.get("notify_date_changes")):
         return
-    if not s.get("bot_token") or not s.get("chat_id"):
+    if not s or not s.get("bot_token") or not s.get("chat_id"):
         return
     if not changes:
         return
@@ -614,11 +614,11 @@ async def notify_date_changes(changes: list[dict]):
 
 
 async def notify_new_card(title: str, release_date: str | None,
-                          source: str, card_type: str | None):
+                          source: str, card_type: str | None, force: bool = False):
     s = get_telegram_settings()
-    if not s or not s.get("enabled") or not s.get("notify_new_cards"):
+    if not force and (not s or not s.get("enabled") or not s.get("notify_new_cards")):
         return
-    if not s.get("bot_token") or not s.get("chat_id"):
+    if not s or not s.get("bot_token") or not s.get("chat_id"):
         return
 
     lines = ["🆕 <b>Новая карточка в каталоге</b>", ""]
@@ -637,11 +637,11 @@ async def notify_new_card(title: str, release_date: str | None,
 
 
 async def notify_new_season(show_title: str, season_number: int,
-                            release_date: str | None):
+                            release_date: str | None, force: bool = False):
     s = get_telegram_settings()
-    if not s or not s.get("enabled") or not s.get("notify_new_seasons"):
+    if not force and (not s or not s.get("enabled") or not s.get("notify_new_seasons")):
         return
-    if not s.get("bot_token") or not s.get("chat_id"):
+    if not s or not s.get("bot_token") or not s.get("chat_id"):
         return
 
     lines = [
@@ -658,11 +658,11 @@ async def notify_new_season(show_title: str, season_number: int,
     print(f"[telegram] New season notification: {show_title} S{season_number}")
 
 
-async def notify_new_episodes(show_title: str, new_eps: list[dict]):
+async def notify_new_episodes(show_title: str, new_eps: list[dict], force: bool = False):
     s = get_telegram_settings()
-    if not s or not s.get("enabled") or not s.get("notify_new_episodes"):
+    if not force and (not s or not s.get("enabled") or not s.get("notify_new_episodes")):
         return
-    if not s.get("bot_token") or not s.get("chat_id"):
+    if not s or not s.get("bot_token") or not s.get("chat_id"):
         return
     if not new_eps:
         return
@@ -703,9 +703,12 @@ async def notify_new_episodes(show_title: str, new_eps: list[dict]):
     print(f"[telegram] New episodes notification: {show_title} ({len(sorted_eps)} eps)")
 
 
-async def check_and_notify():
+async def check_and_notify(force: bool = False):
+    """Scheduled job: sends upcoming releases (titles, seasons, episodes) to Telegram."""
     s = get_telegram_settings()
-    if not s or not s.get("enabled"):
+    if not force and (not s or not s.get("enabled")):
+        return
+    if not s or not s.get("bot_token") or not s.get("chat_id"):
         return
     today = date.today()
     notify_days = s.get("notify_days", 1)
@@ -760,7 +763,12 @@ async def check_and_notify():
             upcoming.append((delta, label, row["release_date"]))
 
     if not upcoming:
-        print("[telegram] No upcoming releases to notify")
+        if force:
+            await send_telegram(
+                f"🎬 <b>Тестовая рассылка</b>\n"
+                f"Предстоящих релизов в горизонте {notify_days} дн. нет.")
+        else:
+            print("[telegram] No upcoming releases to notify")
         return
 
     upcoming.sort()
@@ -923,7 +931,7 @@ async def refresh_single(external_id: str) -> bool:
         return False
     row = dict(rows[0])
     if row["source"] == "local":
-        return False  # Nothing to refresh from API
+        return False
     src = SOURCES.get(row["source"])
     if not src:
         return False
@@ -1162,7 +1170,6 @@ async def add(title: str = Form(...),
         resp.set_cookie("source", src.name, max_age=60 * 60 * 24 * 365)
         return resp
     else:
-        # Create local card when nothing found
         local_id = f"local:{uuid.uuid4().hex[:12]}"
         db("""INSERT INTO titles
               (external_id, title, type, release_date, poster_url, genres, source, updated_at)
@@ -1239,12 +1246,48 @@ async def save_telegram(bot_token: str = Form(""),
     return RedirectResponse("/settings?msg=telegram-saved", status_code=303)
 
 
-@app.post("/settings/telegram/test")
-async def telegram_test():
+@app.post("/settings/telegram/test/{test_type}")
+async def telegram_test(test_type: str):
     s = get_telegram_settings()
     if not s.get("bot_token") or not s.get("chat_id"):
         return RedirectResponse("/settings?msg=test-fail", status_code=303)
-    ok = await send_telegram("🎬 <b>Тестовое сообщение</b>\nВсё работает!")
+
+    today = date.today()
+    ok = True
+
+    if test_type == "simple":
+        ok = await send_telegram("🎬 <b>Тестовое сообщение</b>\nВсё работает!")
+
+    elif test_type == "date-change":
+        await notify_date_changes([{
+            "title": "Тестовый фильм",
+            "old_date": (today + timedelta(days=10)).isoformat(),
+            "new_date": (today + timedelta(days=15)).isoformat(),
+        }], force=True)
+
+    elif test_type == "new-card":
+        await notify_new_card("Тестовый фильм",
+                              (today + timedelta(days=30)).isoformat(),
+                              "tmdb", "movie", force=True)
+
+    elif test_type == "new-season":
+        await notify_new_season("Тестовый сериал", 2,
+                                (today + timedelta(days=20)).isoformat(),
+                                force=True)
+
+    elif test_type == "new-episodes":
+        await notify_new_episodes("Тестовый сериал", [
+            {"season_number": 1, "episode_number": 5,
+             "name": "Тестовый эпизод",
+             "release_date": today.isoformat()},
+        ], force=True)
+
+    elif test_type == "daily":
+        await check_and_notify(force=True)
+
+    else:
+        return RedirectResponse("/settings?msg=test-fail", status_code=303)
+
     msg = "test-ok" if ok else "test-fail"
     return RedirectResponse(f"/settings?msg={msg}", status_code=303)
 
