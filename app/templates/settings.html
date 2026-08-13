@@ -1,130 +1,139 @@
-<!doctype html>
-<html lang="ru">
+{% extends "base.html" %}
+{% block title %}Настройки{% endblock %}
 
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Настройки Telegram</title>
-    <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-        }
+{% block extra_css %}
+<style>
+    .section {
+        background: #1a1f2b;
+        padding: 20px 24px;
+        border-radius: 12px;
+        margin-bottom: 20px;
+    }
 
-        body {
-            background: #10131a;
-            color: #e9ecf3;
-            font: 16px/1.4 system-ui, sans-serif;
-            padding: 24px;
-            max-width: 700px;
-            margin: auto;
-        }
+    .section h2 {
+        font-size: 18px;
+        margin-bottom: 16px;
+    }
 
-        h1 {
-            font-size: 24px;
-            margin-bottom: 16px;
-        }
+    .field {
+        display: flex;
+        flex-direction: column;
+        margin-bottom: 14px;
+        max-width: 500px;
+    }
 
-        .message {
-            color: #7bd88f;
-            margin-bottom: 16px;
-        }
+    .field label {
+        font-size: 14px;
+        color: #9aa3b8;
+        margin-bottom: 6px;
+    }
 
-        form {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
+    .field input,
+    .field select {
+        width: 100%;
+    }
 
-        label {
-            font-size: 14px;
-            color: #9aa3b8;
-            margin-bottom: 4px;
-            display: block;
-        }
+    .field .hint {
+        font-size: 13px;
+        color: #6a7389;
+        margin-top: 4px;
+    }
 
-        input,
-        select {
-            padding: 10px 12px;
-            border-radius: 8px;
-            border: 1px solid #2a3140;
-            background: #1a1f2b;
-            color: inherit;
-            font-size: 15px;
-        }
+    .check-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 12px;
+    }
 
-        input[type=checkbox] {
-            width: 20px;
-            height: 20px;
-        }
+    .check-row label {
+        margin: 0;
+        font-size: 14px;
+    }
 
-        .check-row {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
+    .btn-row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+    }
 
-        button {
-            padding: 10px 18px;
-            border: 0;
-            border-radius: 8px;
-            background: #4f8cff;
-            color: #fff;
-            cursor: pointer;
-        }
+    .last-sent {
+        font-size: 13px;
+        color: #6a7389;
+        margin-top: 12px;
+    }
 
-        button:hover {
-            background: #3a78eb;
-        }
+    .log-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+        margin-top: 12px;
+    }
 
-        button.secondary {
-            background: #2a3140;
-        }
+    .log-table th,
+    .log-table td {
+        padding: 8px 12px;
+        text-align: left;
+        border-bottom: 1px solid #2a3140;
+    }
 
-        button.secondary:hover {
-            background: #343d4f;
-        }
+    .log-table th {
+        color: #9aa3b8;
+        font-weight: 600;
+    }
 
-        .btn-row {
-            display: flex;
-            gap: 8px;
-        }
+    .log-table td.old {
+        color: #ff7b7b;
+    }
 
-        .hint {
-            font-size: 13px;
-            color: #6a7389;
-            margin-top: 4px;
-        }
+    .log-table td.new {
+        color: #7bd88f;
+    }
 
-        .back {
-            display: inline-block;
-            margin-bottom: 16px;
-            color: #4f8cff;
-            text-decoration: none;
-        }
+    .field-name {
+        background: #0c0f14;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 12px;
+    }
 
-        .back:hover {
-            text-decoration: underline;
-        }
+    .empty {
+        color: #9aa3b8;
+        margin-top: 8px;
+    }
+</style>
+{% endblock %}
 
-        .field {
-            display: flex;
-            flex-direction: column;
-        }
+{% block content %}
+<h1 class="page-title">⚙ Настройки</h1>
 
-        .last-sent {
-            font-size: 13px;
-            color: #6a7389;
-            margin-top: 8px;
-        }
-    </style>
-</head>
+{% if message %}<p class="message">{{ message }}</p>{% endif %}
 
-<body>
-    <a class="back" href="/">← Назад</a>
-    <h1>🔔 Настройки Telegram</h1>
-    {% if message %}<p class="message">{{ message }}</p>{% endif %}
+<div class="section">
+    <h2>🔄 Автообновление</h2>
+    <form method="post" action="/settings/refresh">
+        <div class="field">
+            <label>Период обновления карточек из API</label>
+            <select name="hours">
+                <option value="1" {% if refresh_hours==1 %}selected{% endif %}>каждый час</option>
+                <option value="6" {% if refresh_hours==6 %}selected{% endif %}>каждые 6 часов</option>
+                <option value="12" {% if refresh_hours==12 %}selected{% endif %}>каждые 12 часов</option>
+                <option value="24" {% if refresh_hours==24 %}selected{% endif %}>раз в день</option>
+                <option value="48" {% if refresh_hours==48 %}selected{% endif %}>раз в 2 дня</option>
+                <option value="72" {% if refresh_hours==72 %}selected{% endif %}>раз в 3 дня</option>
+                <option value="168" {% if refresh_hours==168 %}selected{% endif %}>раз в неделю</option>
+            </select>
+            <p class="hint">Сейчас: {{ refresh_label }}. Настройка сохраняется в БД и переживает перезапуск.</p>
+        </div>
+        <div class="btn-row">
+            <button type="submit">Сохранить</button>
+        </div>
+    </form>
+</div>
 
+<div class="section">
+    <h2>🔔 Telegram-уведомления</h2>
     <form method="post" action="/settings/telegram">
         <div class="field">
             <label>Bot Token (от @BotFather)</label>
@@ -141,35 +150,35 @@
 
         <div class="check-row">
             <input type="checkbox" name="enabled" id="enabled" {% if tg.get('enabled') %}checked{% endif %}>
-            <label for="enabled" style="margin:0">Включить уведомления о релизах</label>
+            <label for="enabled">Включить уведомления о релизах</label>
         </div>
 
         <div class="check-row">
             <input type="checkbox" name="notify_date_changes" id="notify_date_changes" {% if
                 tg.get('notify_date_changes', 1) %}checked{% endif %}>
-            <label for="notify_date_changes" style="margin:0">Уведомлять о переносе дат</label>
+            <label for="notify_date_changes">Уведомлять о переносе дат</label>
         </div>
 
         <div class="check-row">
             <input type="checkbox" name="notify_new_cards" id="notify_new_cards" {% if tg.get('notify_new_cards', 1)
                 %}checked{% endif %}>
-            <label for="notify_new_cards" style="margin:0">Уведомлять о новых карточках</label>
+            <label for="notify_new_cards">Уведомлять о новых карточках</label>
         </div>
 
         <div class="check-row">
             <input type="checkbox" name="notify_new_seasons" id="notify_new_seasons" {% if tg.get('notify_new_seasons',
                 1) %}checked{% endif %}>
-            <label for="notify_new_seasons" style="margin:0">Уведомлять о новых сезонах</label>
+            <label for="notify_new_seasons">Уведомлять о новых сезонах</label>
         </div>
 
         <div class="check-row">
             <input type="checkbox" name="notify_new_episodes" id="notify_new_episodes" {% if
                 tg.get('notify_new_episodes', 1) %}checked{% endif %}>
-            <label for="notify_new_episodes" style="margin:0">Уведомлять о новых эпизодах</label>
+            <label for="notify_new_episodes">Уведомлять о новых эпизодах</label>
         </div>
 
         <div class="field">
-            <label>Время отправки</label>
+            <label>Время отправки ежедневной рассылки</label>
             <input type="time" name="send_time" value="{{ tg.get('send_time', '09:00') }}">
         </div>
 
@@ -177,8 +186,7 @@
             <label>Уведомлять за сколько дней до релиза</label>
             <select name="notify_days">
                 <option value="0" {% if tg.get('notify_days')==0 %}selected{% endif %}>только в день релиза</option>
-                <option value="1" {% if tg.get('notify_days')==1 %}selected{% endif %}>за 1 день (сегодня и завтра)
-                </option>
+                <option value="1" {% if tg.get('notify_days')==1 %}selected{% endif %}>за 1 день</option>
                 <option value="3" {% if tg.get('notify_days')==3 %}selected{% endif %}>за 3 дня</option>
                 <option value="7" {% if tg.get('notify_days')==7 %}selected{% endif %}>за неделю</option>
             </select>
@@ -189,13 +197,42 @@
         </div>
     </form>
 
-    <form method="post" action="/settings/telegram/test" style="margin-top:16px">
-        <button type="submit" class="secondary">Отправить тестовое сообщение</button>
+    <form method="post" action="/settings/telegram/test" style="margin-top:14px">
+        <button type="submit" class="secondary">📤 Отправить тестовое сообщение</button>
     </form>
 
     {% if tg.get('last_sent') %}
     <p class="last-sent">Последняя отправка: {{ tg['last_sent'] }}</p>
     {% endif %}
-</body>
+</div>
 
-</html>
+<div class="section">
+    <h2>📋 Журнал обновлений</h2>
+    {% if log_rows %}
+    <table class="log-table">
+        <thead>
+            <tr>
+                <th>Время</th>
+                <th>Название</th>
+                <th>Поле</th>
+                <th>Было</th>
+                <th>Стало</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in log_rows %}
+            <tr>
+                <td>{{ r.created_at }}</td>
+                <td>{{ r.title }}</td>
+                <td><span class="field-name">{{ r.field }}</span></td>
+                <td class="old">{{ r.old_value or '—' }}</td>
+                <td class="new">{{ r.new_value or '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty">Журнал пуст. Изменения появятся после первого обновления карточек.</p>
+    {% endif %}
+</div>
+{% endblock %}

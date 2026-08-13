@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Добавить карточку{% endblock %}
+
+{% block extra_css %}
+<style>
+    .add-form {
+        max-width: 560px;
+        background: #1a1f2b;
+        padding: 24px;
+        border-radius: 12px;
+    }
+
+    .add-form .field {
+        display: flex;
+        flex-direction: column;
+        margin-bottom: 16px;
+    }
+
+    .add-form label {
+        font-size: 14px;
+        color: #9aa3b8;
+        margin-bottom: 6px;
+    }
+
+    .add-form input,
+    .add-form select {
+        width: 100%;
+    }
+
+    .add-form .hint {
+        font-size: 13px;
+        color: #6a7389;
+        margin-top: 4px;
+    }
+
+    .add-form button {
+        margin-top: 8px;
+        width: 100%;
+    }
+
+    .info-box {
+        background: #1a1f2b;
+        padding: 16px;
+        border-radius: 12px;
+        margin-top: 20px;
+        border-left: 3px solid #4f8cff;
+        max-width: 560px;
+    }
+
+    .info-box h3 {
+        font-size: 15px;
+        margin-bottom: 6px;
+    }
+
+    .info-box p {
+        font-size: 13px;
+        color: #9aa3b8;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1 class="page-title">➕ Добавить карточку</h1>
+
+{% if message %}<p class="message">{{ message }}</p>{% endif %}
+
+<form class="add-form" method="post" action="/add">
+    <div class="field">
+        <label for="title">Название фильма или сериала</label>
+        <input id="title" name="title" placeholder="Например: Дюна: Часть третья" required autofocus>
+    </div>
+
+    <div class="field">
+        <label for="release_date">Дата релиза (если известна)</label>
+        <input type="date" id="release_date" name="release_date">
+        <p class="hint">Не обязательно. Если оставить пустым, подтянется из API.</p>
+    </div>
+
+    <div class="field">
+        <label for="source">Источник данных</label>
+        <select id="source" name="source">
+            {% for s in sources %}
+            <option value="{{ s }}" {% if s==default_source %}selected{% endif %}>
+                {% if s == 'omdb' %}OMDb (IMDb){% else %}TMDB{% endif %}
+            </option>
+            {% endfor %}
+        </select>
+        <p class="hint">Для сериалов рекомендуется TMDB (поддерживает сезоны и эпизоды).</p>
+    </div>
+
+    <button type="submit">Добавить</button>
+</form>
+
+<div class="info-box">
+    <h3>💡 Если карточка не находится в API</h3>
+    <p>Система всё равно сохранит её с указанными данными как локальную.
+        Локальные карточки не обновляются автоматически, но попадают в календарь и уведомления.</p>
+</div>
+{% endblock %}

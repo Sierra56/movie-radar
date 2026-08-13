@@ -1,223 +1,194 @@
-<!doctype html>
-<html lang="ru">
+{% extends "base.html" %}
+{% block title %}{{ card.title }} — {{ season.name or ('Сезон ' ~ season.season_number) }}{% endblock %}
 
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ card.title }} — {{ season.name or ('Сезон ' ~ season.season_number) }}</title>
-    <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-        }
+{% block extra_css %}
+<style>
+    h1.page-title {
+        font-size: 24px;
+        margin-bottom: 8px;
+    }
 
-        body {
-            background: #10131a;
-            color: #e9ecf3;
-            font: 16px/1.4 system-ui, sans-serif;
-            padding: 24px;
-            max-width: 900px;
-            margin: auto;
-        }
+    .meta-sub {
+        color: #9aa3b8;
+        font-size: 15px;
+        margin-bottom: 16px;
+    }
 
-        .back {
-            display: inline-block;
-            margin-bottom: 16px;
-            color: #4f8cff;
-            text-decoration: none;
-        }
+    .progress-block {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+    }
 
-        .back:hover {
-            text-decoration: underline;
-        }
+    .progress-bar {
+        flex: 1;
+        min-width: 200px;
+        background: #2a3140;
+        border-radius: 6px;
+        height: 12px;
+        overflow: hidden;
+    }
 
-        h1 {
-            font-size: 24px;
-            margin-bottom: 8px;
-        }
+    .progress-fill {
+        background: #7bd88f;
+        height: 100%;
+        transition: width .3s;
+    }
 
-        .meta {
-            color: #9aa3b8;
-            font-size: 15px;
-            margin-bottom: 16px;
-        }
+    .progress-text {
+        font-size: 14px;
+        color: #9aa3b8;
+        white-space: nowrap;
+    }
 
-        .progress-block {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 24px;
-            flex-wrap: wrap;
-        }
+    .btn-watch-all {
+        padding: 8px 14px;
+        border: 0;
+        border-radius: 8px;
+        background: #2a3140;
+        color: #fff;
+        cursor: pointer;
+        font-size: 13px;
+    }
 
-        .progress-bar {
-            flex: 1;
-            min-width: 200px;
-            background: #2a3140;
-            border-radius: 6px;
-            height: 12px;
-            overflow: hidden;
-        }
+    .btn-watch-all:hover {
+        background: #343d4f;
+    }
 
-        .progress-fill {
-            background: #7bd88f;
-            height: 100%;
-            transition: width .3s;
-        }
+    .episodes {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
 
-        .progress-text {
-            font-size: 14px;
-            color: #9aa3b8;
-            white-space: nowrap;
-        }
+    .episode {
+        display: flex;
+        gap: 16px;
+        background: #1a1f2b;
+        border-radius: 12px;
+        overflow: hidden;
+    }
 
-        .btn-watch-all {
-            padding: 8px 14px;
-            border: 0;
-            border-radius: 8px;
-            background: #2a3140;
-            color: #fff;
-            cursor: pointer;
-            font-size: 13px;
-        }
+    .episode.watched {
+        opacity: .65;
+    }
 
-        .btn-watch-all:hover {
-            background: #343d4f;
-        }
+    .episode img,
+    .episode .no-still {
+        width: 180px;
+        aspect-ratio: 16/9;
+        object-fit: cover;
+        flex-shrink: 0;
+    }
 
-        .episodes {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
+    .episode .no-still {
+        background: #232a39;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #8b93a7;
+        font-size: 13px;
+    }
 
-        .episode {
-            display: flex;
-            gap: 16px;
-            background: #1a1f2b;
-            border-radius: 12px;
-            overflow: hidden;
-        }
+    .episode .info {
+        padding: 12px 16px 12px 0;
+        flex: 1;
+    }
 
-        .episode.watched {
-            opacity: .65;
-        }
+    .episode h3 {
+        font-size: 15px;
+        margin-bottom: 4px;
+    }
 
-        .episode img,
-        .episode .no-still {
-            width: 180px;
-            aspect-ratio: 16/9;
-            object-fit: cover;
-            flex-shrink: 0;
-        }
+    .episode.watched h3 {
+        text-decoration: line-through;
+    }
 
-        .episode .no-still {
-            background: #232a39;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #8b93a7;
-            font-size: 13px;
-        }
+    .episode .meta-line {
+        color: #9aa3b8;
+        font-size: 13px;
+    }
 
-        .episode .info {
-            padding: 12px 16px 12px 0;
-            flex: 1;
-        }
+    .episode .overview {
+        color: #8b93a7;
+        font-size: 13px;
+        margin-top: 6px;
+    }
 
-        .episode h3 {
-            font-size: 15px;
-            margin-bottom: 4px;
-        }
+    form.watch-toggle {
+        display: flex;
+        align-items: center;
+        padding: 12px 0 12px 14px;
+    }
 
-        .episode.watched h3 {
-            text-decoration: line-through;
-        }
+    form.watch-toggle input {
+        width: 22px;
+        height: 22px;
+        cursor: pointer;
+        accent-color: #7bd88f;
+    }
 
-        .episode .meta-line {
-            color: #9aa3b8;
-            font-size: 13px;
-        }
+    .empty {
+        color: #9aa3b8;
+        margin-top: 20px;
+    }
+</style>
+{% endblock %}
 
-        .episode .overview {
-            color: #8b93a7;
-            font-size: 13px;
-            margin-top: 6px;
-        }
+{% block content %}
+<a href="/title/{{ card.external_id }}"
+    style="display:inline-block; margin-bottom:16px; color:#4f8cff; text-decoration:none;">← Назад к сериалу</a>
 
-        form.watch-toggle {
-            display: flex;
-            align-items: center;
-            padding: 12px 0 12px 14px;
-        }
+<h1 class="page-title">{{ card.title }} — {{ season.name or ('Сезон ' ~ season.season_number) }}</h1>
+<p class="meta-sub">
+    {% if season.date_human %}{{ season.date_human }}{% else %}дата неизвестна{% endif %}
+    {% if season.episodes %} · {{ season.episodes }} эп.{% endif %}
+</p>
 
-        form.watch-toggle input {
-            width: 22px;
-            height: 22px;
-            cursor: pointer;
-            accent-color: #7bd88f;
-        }
+{% if total_count > 0 %}
+<div class="progress-block">
+    <div class="progress-bar">
+        <div class="progress-fill" style="width:{{ percent }}%"></div>
+    </div>
+    <span class="progress-text">{{ watched_count }} / {{ total_count }} ({{ percent }}%)</span>
+    <form method="post" action="/watch-season/{{ card.external_id }}/{{ season.season_number }}">
+        <button type="submit" class="btn-watch-all">
+            {% if all_watched %}↩️ Снять отметки{% else %}✅ Отметить весь сезон{% endif %}
+        </button>
+    </form>
+</div>
+{% endif %}
 
-        .empty {
-            color: #9aa3b8;
-            margin-top: 20px;
-        }
-    </style>
-</head>
-
-<body>
-    <a class="back" href="/title/{{ card.external_id }}">← Назад к сериалу</a>
-
-    <h1>{{ card.title }} — {{ season.name or ('Сезон ' ~ season.season_number) }}</h1>
-    <p class="meta">
-        {% if season.date_human %}{{ season.date_human }}{% else %}дата неизвестна{% endif %}
-        {% if season.episodes %} · {{ season.episodes }} эп.{% endif %}
-    </p>
-
-    {% if total_count > 0 %}
-    <div class="progress-block">
-        <div class="progress-bar">
-            <div class="progress-fill" style="width:{{ percent }}%"></div>
-        </div>
-        <span class="progress-text">{{ watched_count }} / {{ total_count }} ({{ percent }}%)</span>
-        <form method="post" action="/watch-season/{{ card.external_id }}/{{ season.season_number }}">
-            <button type="submit" class="btn-watch-all">
-                {% if all_watched %}↩️ Снять отметки{% else %}✅ Отметить весь сезон{% endif %}
-            </button>
+{% if episodes %}
+<div class="episodes">
+    {% for e in episodes %}
+    <div class="episode {{ 'watched' if e.watched else '' }}">
+        <form class="watch-toggle" method="post"
+            action="/watch/{{ card.external_id }}/{{ season.season_number }}/{{ e.episode_number }}">
+            <input type="checkbox" name="watched" {% if e.watched %}checked{% endif %} onchange="this.form.submit()"
+                aria-label="Отметить эпизод {{ e.episode_number }} просмотренным">
         </form>
-    </div>
-    {% endif %}
-
-    {% if episodes %}
-    <div class="episodes">
-        {% for e in episodes %}
-        <div class="episode {{ 'watched' if e.watched else '' }}">
-            <form class="watch-toggle" method="post"
-                action="/watch/{{ card.external_id }}/{{ season.season_number }}/{{ e.episode_number }}">
-                <input type="checkbox" name="watched" {% if e.watched %}checked{% endif %} onchange="this.form.submit()"
-                    aria-label="Отметить эпизод {{ e.episode_number }} просмотренным">
-            </form>
-            {% if e.poster_url %}
-            <img src="{{ e.poster_url }}" alt="Кадр из эпизода {{ e.episode_number }}" loading="lazy">
-            {% else %}
-            <div class="no-still">нет кадра</div>
+        {% if e.poster_url %}
+        <img src="{{ e.poster_url }}" alt="Кадр из эпизода {{ e.episode_number }}" loading="lazy">
+        {% else %}
+        <div class="no-still">нет кадра</div>
+        {% endif %}
+        <div class="info">
+            <h3>Эпизод {{ e.episode_number }}{% if e.name %}: {{ e.name }}{% endif %}</h3>
+            <p class="meta-line">
+                {% if e.date_human %}{{ e.date_human }}{% else %}дата неизвестна{% endif %}
+                {% if e.runtime %} · {{ e.runtime }} мин.{% endif %}
+            </p>
+            {% if e.overview %}
+            <p class="overview">{{ e.overview[:200] }}{% if e.overview|length > 200 %}…{% endif %}</p>
             {% endif %}
-            <div class="info">
-                <h3>Эпизод {{ e.episode_number }}{% if e.name %}: {{ e.name }}{% endif %}</h3>
-                <p class="meta-line">
-                    {% if e.date_human %}{{ e.date_human }}{% else %}дата неизвестна{% endif %}
-                    {% if e.runtime %} · {{ e.runtime }} мин.{% endif %}
-                </p>
-                {% if e.overview %}
-                <p class="overview">{{ e.overview[:200] }}{% if e.overview|length > 200 %}…{% endif %}</p>
-                {% endif %}
-            </div>
         </div>
-        {% endfor %}
     </div>
-    {% else %}
-    <p class="empty">Эпизоды не загружены.</p>
-    {% endif %}
-</body>
-
-</html>
+    {% endfor %}
+</div>
+{% else %}
+<p class="empty">Эпизоды не загружены.</p>
+{% endif %}
+{% endblock %}

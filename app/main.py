@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import asyncio
+import uuid
 from abc import ABC, abstractmethod
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
@@ -24,7 +25,6 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 MONTHS_RU = ["января", "февраля", "марта", "апреля", "мая", "июня",
              "июля", "августа", "сентября", "октября", "ноября", "декабря"]
 
-# Global refresh progress (visible to /refresh-status endpoint)
 refresh_progress = {"running": False, "done": 0, "total": 0}
 
 
@@ -169,7 +169,6 @@ class TmdbSource(Source):
             return None
 
     async def fetch_seasons(self, tmdb_id: int) -> list[dict]:
-        """Fetch all seasons for a TV show."""
         d = await self._get(f"/tv/{tmdb_id}")
         seasons = []
         for s in d.get("seasons", []):
@@ -183,7 +182,6 @@ class TmdbSource(Source):
         return seasons
 
     async def fetch_episodes(self, tmdb_id: int, season_number: int) -> list[dict]:
-        """Fetch all episodes for a specific season."""
         d = await self._get(f"/tv/{tmdb_id}/season/{season_number}")
         episodes = []
         for e in d.get("episodes", []):
@@ -399,7 +397,6 @@ def progress_percent(watched: int, total: int) -> int:
 
 # ── Seasons & episodes helpers ────────────────────────
 def save_seasons(title_external_id: str, seasons: list[dict]) -> list[dict]:
-    """Save or update seasons. Returns list of newly added seasons."""
     existing = db("SELECT season_number FROM seasons WHERE title_external_id=?",
                   (title_external_id,))
     existing_numbers = {r["season_number"] for r in existing}
@@ -422,7 +419,6 @@ def save_seasons(title_external_id: str, seasons: list[dict]) -> list[dict]:
 
 def save_episodes(title_external_id: str, season_number: int,
                   episodes: list[dict]) -> list[dict]:
-    """Save or update episodes. Returns list of newly added episodes."""
     rows = db("SELECT id FROM seasons WHERE title_external_id=? AND season_number=?",
               (title_external_id, season_number))
     if not rows:
@@ -708,7 +704,6 @@ async def notify_new_episodes(show_title: str, new_eps: list[dict]):
 
 
 async def check_and_notify():
-    """Scheduled job: sends upcoming releases (titles, seasons, episodes) to Telegram."""
     s = get_telegram_settings()
     if not s or not s.get("enabled"):
         return
@@ -717,7 +712,6 @@ async def check_and_notify():
 
     upcoming = []
 
-    # Upcoming title releases
     rows = db("SELECT * FROM titles WHERE release_date IS NOT NULL AND notify_enabled = 1")
     for r in rows:
         row = dict(r)
@@ -729,7 +723,6 @@ async def check_and_notify():
         if 0 <= delta <= notify_days:
             upcoming.append((delta, row["title"], row["release_date"]))
 
-    # Upcoming season releases
     season_rows = db("""SELECT s.*, t.title as show_title, t.notify_enabled
                         FROM seasons s
                         JOIN titles t ON s.title_external_id = t.external_id
@@ -745,7 +738,6 @@ async def check_and_notify():
             label = f"{row['show_title']} — Сезон {row['season_number']}"
             upcoming.append((delta, label, row["release_date"]))
 
-    # Upcoming episode releases
     episode_rows = db("""
         SELECT e.name, e.release_date, e.episode_number,
                s.season_number, t.title as show_title
@@ -805,7 +797,6 @@ def schedule_telegram_job():
 
 # ── Background refresh ────────────────────────────────
 async def refresh_catalog():
-    """Fetches updated data for every active title."""
     global refresh_progress
     rows = db("SELECT * FROM titles")
     today = date.today()
@@ -818,6 +809,12 @@ async def refresh_catalog():
 
     for i, r in enumerate(rows):
         row = dict(r)
+
+        # Skip local cards — no API to refresh from
+        if row["source"] == "local":
+            refresh_progress["done"] = i + 1
+            continue
+
         if row["release_date"]:
             try:
                 rd = date.fromisoformat(row["release_date"])
@@ -883,7 +880,6 @@ async def refresh_catalog():
                write=True)
             updated += 1
 
-        # Auto-refresh seasons and episodes for TMDB series
         if row["type"] == "series" and src.name == "tmdb":
             try:
                 tmdb_id = int(row["external_id"].split(":")[1])
@@ -926,6 +922,8 @@ async def refresh_single(external_id: str) -> bool:
     if not rows:
         return False
     row = dict(rows[0])
+    if row["source"] == "local":
+        return False  # Nothing to refresh from API
     src = SOURCES.get(row["source"])
     if not src:
         return False
@@ -988,7 +986,6 @@ scheduler.add_job(refresh_catalog, "interval", hours=get_refresh_hours(),
 @app.on_event("startup")
 async def on_startup():
     scheduler.start()
-    # Первый запуск через 5 минут после старта
     scheduler.reschedule_job("refresh", trigger="interval", hours=get_refresh_hours())
     scheduler.modify_job("refresh", next_run_time=datetime.now() + timedelta(minutes=5))
     schedule_telegram_job()
@@ -1099,19 +1096,27 @@ async def index(request: Request, sort: str = "date",
 
     messages = {
         "refresh-started": "Обновление запущено в фоне.",
-        "settings-saved": "Настройки сохранены.",
         "card-updated": "Карточка обновлена.",
-        "telegram-saved": "Настройки Telegram сохранены.",
     }
 
     return templates.TemplateResponse(
         request, "index.html", {
             "cards": cards, "sort": sort,
+            "error": "Ничего не нашлось — уточните название." if err else None,
+            "message": messages.get(msg),
+        })
+
+
+@app.get("/new", response_class=HTMLResponse)
+async def new_card_page(request: Request, msg: str | None = None):
+    messages = {
+        "added-local": "Карточка добавлена локально (в API не найдена).",
+        "added": "Карточка добавлена.",
+    }
+    return templates.TemplateResponse(
+        request, "add.html", {
             "sources": list(SOURCES.keys()),
             "default_source": request.cookies.get("source", "omdb"),
-            "refresh_hours": get_refresh_hours(),
-            "refresh_label": refresh_period_label(get_refresh_hours()),
-            "error": "Ничего не нашлось — уточните название." if err else None,
             "message": messages.get(msg),
         })
 
@@ -1121,43 +1126,51 @@ async def add(title: str = Form(...),
               release_date: str | None = Form(None),
               source: str = Form("omdb")):
     src = SOURCES.get(source, SOURCES["omdb"])
+    results = []
     try:
         results = await src.search(title)
-    except Exception:
-        return RedirectResponse("/?err=1", status_code=303)
-    if not results:
-        return RedirectResponse("/?err=1", status_code=303)
+    except Exception as e:
+        print(f"[add] Search error: {e}")
 
-    info = results[0]
-    rd = info["release_date"] or release_date or None
+    if results:
+        info = results[0]
+        rd = info["release_date"] or release_date or None
 
-    db("""INSERT OR REPLACE INTO titles
-          (external_id, title, type, release_date, poster_url, genres, source, updated_at)
-          VALUES (?,?,?,?,?,?,?,datetime('now'))""",
-       (info["external_id"], info["title"], info["type"], rd,
-        info["poster_url"], info["genres"], src.name), write=True)
+        db("""INSERT OR REPLACE INTO titles
+              (external_id, title, type, release_date, poster_url, genres, source, updated_at)
+              VALUES (?,?,?,?,?,?,?,datetime('now'))""",
+           (info["external_id"], info["title"], info["type"], rd,
+            info["poster_url"], info["genres"], src.name), write=True)
 
-    # Fetch seasons and episodes for series via TMDB (no notifications on initial add)
-    if info["type"] == "series" and src.name == "tmdb":
-        try:
-            tmdb_id = int(info["external_id"].split(":")[1])
-            seasons = await src.fetch_seasons(tmdb_id)
-            save_seasons(info["external_id"], seasons)
-            for season in seasons:
-                try:
-                    episodes = await src.fetch_episodes(tmdb_id, season["season_number"])
-                    save_episodes(info["external_id"], season["season_number"], episodes)
-                    await asyncio.sleep(0.5)
-                except Exception:
-                    pass
-        except Exception as e:
-            print(f"[add] Error fetching seasons: {e}")
+        if info["type"] == "series" and src.name == "tmdb":
+            try:
+                tmdb_id = int(info["external_id"].split(":")[1])
+                seasons = await src.fetch_seasons(tmdb_id)
+                save_seasons(info["external_id"], seasons)
+                for season in seasons:
+                    try:
+                        episodes = await src.fetch_episodes(tmdb_id, season["season_number"])
+                        save_episodes(info["external_id"], season["season_number"], episodes)
+                        await asyncio.sleep(0.5)
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[add] Error fetching seasons: {e}")
 
-    await notify_new_card(info["title"], rd, src.name, info["type"])
-
-    resp = RedirectResponse("/", status_code=303)
-    resp.set_cookie("source", src.name, max_age=60 * 60 * 24 * 365)
-    return resp
+        await notify_new_card(info["title"], rd, src.name, info["type"])
+        resp = RedirectResponse("/new?msg=added", status_code=303)
+        resp.set_cookie("source", src.name, max_age=60 * 60 * 24 * 365)
+        return resp
+    else:
+        # Create local card when nothing found
+        local_id = f"local:{uuid.uuid4().hex[:12]}"
+        db("""INSERT INTO titles
+              (external_id, title, type, release_date, poster_url, genres, source, updated_at)
+              VALUES (?,?,?,?,?,?,?,datetime('now'))""",
+           (local_id, title.strip(), None, release_date or None, None, "", "local"),
+           write=True)
+        await notify_new_card(title.strip(), release_date, "local", None)
+        return RedirectResponse("/new?msg=added-local", status_code=303)
 
 
 @app.post("/refresh")
@@ -1177,28 +1190,33 @@ async def refresh_card(external_id: str, sort: str = "date"):
     return RedirectResponse(f"/?sort={sort}&msg=card-updated", status_code=303)
 
 
-@app.post("/settings/refresh")
-async def set_refresh_interval(hours: int = Form(...)):
-    hours = max(1, min(168, hours))
-    set_setting("refresh_hours", str(hours))
-    scheduler.reschedule_job("refresh", trigger="interval", hours=hours)
-    print(f"[settings] Refresh interval changed to {hours}h")
-    return RedirectResponse("/?msg=settings-saved", status_code=303)
-
-
-@app.get("/settings/telegram", response_class=HTMLResponse)
-async def telegram_settings_page(request: Request, msg: str | None = None):
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request, msg: str | None = None):
     s = get_telegram_settings()
+    log_rows = db("SELECT * FROM updates_log ORDER BY created_at DESC LIMIT 200")
     messages = {
-        "saved": "Настройки сохранены.",
+        "refresh-saved": "Период обновления сохранён.",
+        "telegram-saved": "Настройки Telegram сохранены.",
         "test-ok": "Тестовое сообщение отправлено!",
         "test-fail": "Не удалось отправить. Проверьте токен и chat_id.",
     }
     return templates.TemplateResponse(
         request, "settings.html", {
             "tg": s,
+            "refresh_hours": get_refresh_hours(),
+            "refresh_label": refresh_period_label(get_refresh_hours()),
+            "log_rows": [dict(r) for r in log_rows],
             "message": messages.get(msg),
         })
+
+
+@app.post("/settings/refresh")
+async def set_refresh_interval(hours: int = Form(...)):
+    hours = max(1, min(168, hours))
+    set_setting("refresh_hours", str(hours))
+    scheduler.reschedule_job("refresh", trigger="interval", hours=hours)
+    print(f"[settings] Refresh interval changed to {hours}h")
+    return RedirectResponse("/settings?msg=refresh-saved", status_code=303)
 
 
 @app.post("/settings/telegram")
@@ -1218,24 +1236,17 @@ async def save_telegram(bot_token: str = Form(""),
                            notify_new_seasons == "on",
                            notify_new_episodes == "on")
     schedule_telegram_job()
-    return RedirectResponse("/settings/telegram?msg=saved", status_code=303)
+    return RedirectResponse("/settings?msg=telegram-saved", status_code=303)
 
 
 @app.post("/settings/telegram/test")
 async def telegram_test():
     s = get_telegram_settings()
     if not s.get("bot_token") or not s.get("chat_id"):
-        return RedirectResponse("/settings/telegram?msg=test-fail", status_code=303)
+        return RedirectResponse("/settings?msg=test-fail", status_code=303)
     ok = await send_telegram("🎬 <b>Тестовое сообщение</b>\nВсё работает!")
     msg = "test-ok" if ok else "test-fail"
-    return RedirectResponse(f"/settings/telegram?msg={msg}", status_code=303)
-
-
-@app.get("/log", response_class=HTMLResponse)
-async def log_page(request: Request):
-    rows = db("SELECT * FROM updates_log ORDER BY created_at DESC LIMIT 200")
-    return templates.TemplateResponse(
-        request, "log.html", {"rows": [dict(r) for r in rows]})
+    return RedirectResponse(f"/settings?msg={msg}", status_code=303)
 
 
 @app.get("/export.ics")

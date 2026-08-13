@@ -1,485 +1,341 @@
-<!doctype html>
-<html lang="ru">
+{% extends "base.html" %}
+{% block title %}Скоро на экранах{% endblock %}
 
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Скоро на экранах</title>
-    <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-        }
+{% block extra_css %}
+<style>
+    .actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+        margin-bottom: 16px;
+    }
 
-        body {
-            background: #10131a;
-            color: #e9ecf3;
-            font: 16px/1.4 system-ui, sans-serif;
-            padding: 24px;
-            max-width: 1100px;
-            margin: auto;
-        }
+    .actions a {
+        padding: 10px 18px;
+        border-radius: 8px;
+        text-decoration: none;
+        background: #2a3140;
+        color: #e9ecf3;
+        font-size: 14px;
+        border: 1px solid #343d4f;
+        display: inline-block;
+    }
 
-        h1 {
-            font-size: 24px;
-            margin-bottom: 16px;
-        }
+    .actions a:hover {
+        background: #343d4f;
+    }
 
-        form.add {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
+    .toolbar {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 16px;
+        flex-wrap: wrap;
+    }
 
-        form.add input[name=title] {
-            flex: 1;
-            min-width: 220px;
-            padding: 10px 12px;
-            border-radius: 8px;
-            border: 1px solid #2a3140;
-            background: #1a1f2b;
-            color: inherit;
-        }
+    .toolbar a {
+        padding: 6px 14px;
+        border-radius: 999px;
+        text-decoration: none;
+        background: #1a1f2b;
+        color: #9aa3b8;
+        font-size: 14px;
+        border: 1px solid #2a3140;
+    }
 
-        form.add input[type=date] {
-            padding: 10px;
-            border-radius: 8px;
-            border: 1px solid #2a3140;
-            background: #1a1f2b;
-            color: inherit;
-            color-scheme: dark;
-        }
+    .toolbar a.active {
+        background: #4f8cff;
+        color: #fff;
+        border-color: #4f8cff;
+    }
 
-        form.add select {
-            padding: 10px;
-            border-radius: 8px;
-            border: 1px solid #2a3140;
-            background: #1a1f2b;
-            color: inherit;
-        }
+    .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 16px;
+    }
 
-        button {
-            padding: 10px 18px;
-            border: 0;
-            border-radius: 8px;
-            background: #4f8cff;
-            color: #fff;
-            cursor: pointer;
-        }
+    .card {
+        position: relative;
+        background: #1a1f2b;
+        border-radius: 12px;
+        overflow: hidden;
+    }
 
-        button:hover {
-            background: #3a78eb;
-        }
+    .card img,
+    .no-poster {
+        width: 100%;
+        aspect-ratio: 2/3;
+        object-fit: cover;
+        display: block;
+    }
 
-        button.secondary {
-            background: #2a3140;
-        }
+    .no-poster {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #232a39;
+        color: #8b93a7;
+    }
 
-        button.secondary:hover {
-            background: #343d4f;
-        }
+    .info {
+        padding: 10px 12px 12px;
+    }
 
-        button.small {
-            padding: 6px 12px;
-            font-size: 13px;
-        }
+    .card h2 {
+        font-size: 15px;
+        margin-bottom: 4px;
+    }
 
-        .error {
-            color: #ff7b7b;
-            margin-top: 8px;
-        }
+    .meta {
+        color: #9aa3b8;
+        font-size: 13px;
+    }
 
-        .message {
-            color: #7bd88f;
-            margin-top: 8px;
-        }
+    .genre {
+        color: #8b93a7;
+        font-size: 12px;
+        margin-top: 4px;
+    }
 
-        .actions {
-            display: flex;
-            gap: 8px;
-            margin-top: 20px;
-            flex-wrap: wrap;
-            align-items: center;
-        }
+    .source-tag {
+        position: absolute;
+        top: 6px;
+        left: 6px;
+        background: rgba(0, 0, 0, .6);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        color: #fff;
+    }
 
-        .actions a {
-            padding: 10px 18px;
-            border-radius: 8px;
-            text-decoration: none;
-            background: #2a3140;
-            color: #e9ecf3;
-            font-size: 14px;
-            border: 1px solid #343d4f;
-            display: inline-block;
-        }
+    .badge {
+        display: inline-block;
+        margin-top: 6px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: #274067;
+        color: #bcd4ff;
+        font-size: 12px;
+    }
 
-        .actions a:hover {
-            background: #343d4f;
-        }
+    .badge.out {
+        background: #3a2a2a;
+        color: #ffb4b4;
+    }
 
-        .period-form {
-            display: flex;
-            gap: 6px;
-            align-items: center;
-        }
+    .card-actions {
+        position: absolute;
+        top: 6px;
+        right: 6px;
+        display: flex;
+        gap: 4px;
+    }
 
-        .period-form label {
-            font-size: 13px;
-            color: #9aa3b8;
-        }
+    .card-actions button {
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, .55);
+        font-size: 14px;
+    }
 
-        .period-form select {
-            padding: 8px 10px;
-            border-radius: 8px;
-            border: 1px solid #2a3140;
-            background: #1a1f2b;
-            color: inherit;
-            font-size: 13px;
-        }
+    .card-actions button:hover {
+        background: rgba(0, 0, 0, .8);
+    }
 
-        .toolbar {
-            display: flex;
-            gap: 6px;
-            margin-top: 14px;
-            flex-wrap: wrap;
-        }
+    .empty {
+        color: #9aa3b8;
+        margin-top: 20px;
+    }
 
-        .toolbar a {
-            padding: 6px 14px;
-            border-radius: 999px;
-            text-decoration: none;
-            background: #1a1f2b;
-            color: #9aa3b8;
-            font-size: 14px;
-            border: 1px solid #2a3140;
-        }
+    .updated-at {
+        font-size: 11px;
+        color: #5a6378;
+        margin-top: 4px;
+    }
 
-        .toolbar a.active {
-            background: #4f8cff;
-            color: #fff;
-            border-color: #4f8cff;
-        }
+    .seasons-link {
+        display: block;
+        font-size: 13px;
+        color: #4f8cff;
+        text-decoration: none;
+        margin-top: 6px;
+    }
 
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-            gap: 16px;
-            margin-top: 16px;
-        }
+    .seasons-link:hover {
+        text-decoration: underline;
+    }
 
-        .card {
-            position: relative;
-            background: #1a1f2b;
-            border-radius: 12px;
-            overflow: hidden;
-        }
+    .watch-progress {
+        font-size: 12px;
+        color: #7bd88f;
+        margin-top: 4px;
+    }
 
-        .card img,
-        .no-poster {
-            width: 100%;
-            aspect-ratio: 2/3;
-            object-fit: cover;
-            display: block;
-        }
+    .notify-toggle {
+        margin-top: 8px;
+    }
 
-        .no-poster {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: #232a39;
-            color: #8b93a7;
-        }
+    .notify-toggle label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: #9aa3b8;
+        cursor: pointer;
+    }
 
-        .info {
-            padding: 10px 12px 12px;
-        }
+    .notify-toggle input {
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+    }
 
-        .card h2 {
-            font-size: 15px;
-            margin-bottom: 4px;
-        }
+    #progress-wrap {
+        display: none;
+        margin-bottom: 16px;
+        background: #1a1f2b;
+        border-radius: 8px;
+        padding: 12px;
+    }
 
-        .meta {
-            color: #9aa3b8;
-            font-size: 13px;
-        }
+    #progress-wrap .bar-bg {
+        background: #2a3140;
+        border-radius: 6px;
+        height: 12px;
+        overflow: hidden;
+    }
 
-        .genre {
-            color: #8b93a7;
-            font-size: 12px;
-            margin-top: 4px;
-        }
+    #progress-wrap .bar-fill {
+        background: #4f8cff;
+        height: 100%;
+        width: 0;
+        transition: width .5s;
+    }
 
-        .source-tag {
-            position: absolute;
-            top: 6px;
-            left: 6px;
-            background: rgba(0, 0, 0, .6);
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 11px;
-            color: #fff;
-        }
+    #progress-wrap .bar-text {
+        font-size: 13px;
+        color: #9aa3b8;
+        margin-top: 6px;
+    }
 
-        .badge {
-            display: inline-block;
-            margin-top: 6px;
-            padding: 2px 8px;
-            border-radius: 999px;
-            background: #274067;
-            color: #bcd4ff;
-            font-size: 12px;
-        }
+    .card.local {
+        border: 1px dashed #4f8cff40;
+    }
+</style>
+{% endblock %}
 
-        .badge.out {
-            background: #3a2a2a;
-            color: #ffb4b4;
-        }
+{% block content %}
+<h1 class="page-title">📋 Список</h1>
 
-        .card-actions {
-            position: absolute;
-            top: 6px;
-            right: 6px;
-            display: flex;
-            gap: 4px;
-        }
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+{% if message %}<p class="message">{{ message }}</p>{% endif %}
 
-        .card-actions button {
-            width: 28px;
-            height: 28px;
-            padding: 0;
-            border-radius: 50%;
-            background: rgba(0, 0, 0, .55);
-            font-size: 14px;
-        }
+<div id="progress-wrap">
+    <div class="bar-bg">
+        <div class="bar-fill" id="progress-bar"></div>
+    </div>
+    <div class="bar-text" id="progress-text">Обновление...</div>
+</div>
 
-        .card-actions button:hover {
-            background: rgba(0, 0, 0, .8);
-        }
-
-        .empty {
-            color: #9aa3b8;
-            margin-top: 20px;
-        }
-
-        .hint {
-            font-size: 12px;
-            color: #6a7389;
-            margin-top: 6px;
-        }
-
-        .updated-at {
-            font-size: 11px;
-            color: #5a6378;
-            margin-top: 4px;
-        }
-
-        .seasons-link {
-            display: block;
-            font-size: 13px;
-            color: #4f8cff;
-            text-decoration: none;
-            margin-top: 6px;
-        }
-
-        .seasons-link:hover {
-            text-decoration: underline;
-        }
-
-        .watch-progress {
-            font-size: 12px;
-            color: #7bd88f;
-            margin-top: 4px;
-        }
-
-        .notify-toggle {
-            margin-top: 8px;
-        }
-
-        .notify-toggle label {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 12px;
-            color: #9aa3b8;
-            cursor: pointer;
-        }
-
-        .notify-toggle input {
-            width: 16px;
-            height: 16px;
-            cursor: pointer;
-        }
-
-        #progress-wrap {
-            display: none;
-            margin-top: 16px;
-            background: #1a1f2b;
-            border-radius: 8px;
-            padding: 12px;
-        }
-
-        #progress-wrap .bar-bg {
-            background: #2a3140;
-            border-radius: 6px;
-            height: 12px;
-            overflow: hidden;
-        }
-
-        #progress-wrap .bar-fill {
-            background: #4f8cff;
-            height: 100%;
-            width: 0;
-            transition: width .5s;
-        }
-
-        #progress-wrap .bar-text {
-            font-size: 13px;
-            color: #9aa3b8;
-            margin-top: 6px;
-        }
-    </style>
-</head>
-
-<body>
-    <h1>🎬 Скоро на экранах</h1>
-
-    <form class="add" method="post" action="/add">
-        <input name="title" placeholder="Название фильма или сериала" required autofocus>
-        <input type="date" name="release_date" title="Дата релиза (если известна)">
-        <select name="source" title="Источник данных">
-            {% for s in sources %}
-            <option value="{{ s }}" {% if s==default_source %}selected{% endif %}>
-                {% if s == 'omdb' %}OMDb (IMDb){% else %}TMDB{% endif %}
-            </option>
-            {% endfor %}
-        </select>
-        <button>Добавить</button>
+<div class="actions">
+    <form method="post" action="/refresh">
+        <button class="secondary" type="submit">🔄 Обновить все даты</button>
     </form>
-    {% if error %}<p class="error">{{ error }}</p>{% endif %}
-    {% if message %}<p class="message">{{ message }}</p>{% endif %}
+    <form method="post" action="/notify-all/on?sort={{ sort }}">
+        <button class="secondary small" type="submit">🔔 Все вкл</button>
+    </form>
+    <form method="post" action="/notify-all/off?sort={{ sort }}">
+        <button class="secondary small" type="submit">🔕 Все выкл</button>
+    </form>
+    <a href="/export.ics">📅 Скачать .ics</a>
+</div>
 
-    <div id="progress-wrap">
-        <div class="bar-bg">
-            <div class="bar-fill" id="progress-bar"></div>
+<div class="toolbar">
+    <a href="/?sort=date" class="{% if sort == 'date' %}active{% endif %}">📅 По дате выхода</a>
+    <a href="/?sort=title" class="{% if sort == 'title' %}active{% endif %}">🔤 По названию</a>
+    <a href="/?sort=genre" class="{% if sort == 'genre' %}active{% endif %}">🎭 По жанру</a>
+</div>
+
+<div class="grid">
+    {% for c in cards %}
+    <article class="card {{ 'local' if c.source == 'local' else '' }}">
+        {% if c.source %}<span class="source-tag">{{ c.source }}</span>{% endif %}
+        {% if c.display_poster %}
+        <img src="{{ c.display_poster }}" alt="{{ c.title }}" loading="lazy">
+        {% else %}
+        <div class="no-poster">нет постера</div>
+        {% endif %}
+
+        <div class="card-actions">
+            {% if c.source != 'local' %}
+            <form method="post" action="/refresh/{{ c.external_id }}?sort={{ sort }}">
+                <button title="Обновить карточку">🔄</button>
+            </form>
+            {% endif %}
+            <form method="post" action="/delete/{{ c.external_id }}?sort={{ sort }}">
+                <button title="Удалить">×</button>
+            </form>
         </div>
-        <div class="bar-text" id="progress-text">Обновление...</div>
-    </div>
 
-    <div class="actions">
-        <form method="post" action="/refresh">
-            <button class="secondary" type="submit">🔄 Обновить все даты</button>
-        </form>
+        <div class="info">
+            <h2>{{ c.title }}</h2>
+            <p class="meta">
+                {% if c.date_human %}{{ c.date_human }}{% else %}дата неизвестна{% endif %}
+            </p>
+            {% if c.genres %}<p class="genre">{{ c.genres }}</p>{% endif %}
 
-        <form class="period-form" method="post" action="/settings/refresh">
-            <label>Период автообновления:</label>
-            <select name="hours">
-                <option value="1" {% if refresh_hours==1 %}selected{% endif %}>каждый час</option>
-                <option value="6" {% if refresh_hours==6 %}selected{% endif %}>каждые 6 часов</option>
-                <option value="12" {% if refresh_hours==12 %}selected{% endif %}>каждые 12 часов</option>
-                <option value="24" {% if refresh_hours==24 %}selected{% endif %}>раз в день</option>
-                <option value="48" {% if refresh_hours==48 %}selected{% endif %}>раз в 2 дня</option>
-                <option value="72" {% if refresh_hours==72 %}selected{% endif %}>раз в 3 дня</option>
-                <option value="168" {% if refresh_hours==168 %}selected{% endif %}>раз в неделю</option>
-            </select>
-            <button class="secondary small" type="submit">Применить</button>
-        </form>
-
-        <form method="post" action="/notify-all/on?sort={{ sort }}">
-            <button class="secondary small" type="submit">🔔 Уведомления: все вкл</button>
-        </form>
-        <form method="post" action="/notify-all/off?sort={{ sort }}">
-            <button class="secondary small" type="submit">🔕 Уведомления: все выкл</button>
-        </form>
-
-        <a href="/export.ics">📅 Скачать .ics</a>
-        <a href="/settings/telegram">🔔 Telegram</a>
-        <a href="/log">📋 Журнал</a>
-    </div>
-    <p class="hint">Сейчас: {{ refresh_label }}. Файл .ics можно импортировать в Google Calendar, iOS или Android.</p>
-
-    <div class="toolbar">
-        <a href="/?sort=date" class="{% if sort == 'date' %}active{% endif %}">📅 По дате выхода</a>
-        <a href="/?sort=title" class="{% if sort == 'title' %}active{% endif %}">🔤 По названию</a>
-        <a href="/?sort=genre" class="{% if sort == 'genre' %}active{% endif %}">🎭 По жанру</a>
-    </div>
-
-    <div class="grid">
-        {% for c in cards %}
-        <article class="card">
-            {% if c.source %}<span class="source-tag">{{ c.source }}</span>{% endif %}
-            {% if c.display_poster %}
-            <img src="{{ c.display_poster }}" alt="{{ c.title }}" loading="lazy">
-            {% else %}
-            <div class="no-poster">нет постера</div>
+            {% if c.type == 'series' %}
+            <a class="seasons-link" href="/title/{{ c.external_id }}">
+                📺 {{ c.season_count or 0 }} сезон(ов)
+                {% if c.next_season_date_human %} · следующий: {{ c.next_season_date_human }}{% endif %}
+            </a>
+            {% if c.watch_label %}
+            <p class="watch-progress">📊 {{ c.watch_label }} эп. ({{ c.watch_percent }}%)</p>
+            {% endif %}
             {% endif %}
 
-            <div class="card-actions">
-                <form method="post" action="/refresh/{{ c.external_id }}?sort={{ sort }}">
-                    <button title="Обновить карточку">🔄</button>
-                </form>
-                <form method="post" action="/delete/{{ c.external_id }}?sort={{ sort }}">
-                    <button title="Удалить">×</button>
-                </form>
-            </div>
+            {% if c.badge %}<span class="badge {{ 'out' if c.released else '' }}">{{ c.badge }}</span>{% endif %}
+            {% if c.updated_at %}<p class="updated-at">обновлено: {{ c.updated_at }}</p>{% endif %}
 
-            <div class="info">
-                <h2>{{ c.title }}</h2>
-                <p class="meta">
-                    {% if c.date_human %}{{ c.date_human }}{% else %}дата неизвестна{% endif %}
-                </p>
-                {% if c.genres %}<p class="genre">{{ c.genres }}</p>{% endif %}
+            <form class="notify-toggle" method="post" action="/toggle-notify/{{ c.external_id }}?sort={{ sort }}">
+                <label>
+                    <input type="checkbox" {% if c.notify_enabled %}checked{% endif %} onchange="this.form.submit()">
+                    🔔 Уведомления
+                </label>
+            </form>
+        </div>
+    </article>
+    {% else %}
+    <p class="empty">Пока пусто. <a href="/new">Добавьте первую карточку</a>.</p>
+    {% endfor %}
+</div>
+{% endblock %}
 
-                {% if c.type == 'series' %}
-                <a class="seasons-link" href="/title/{{ c.external_id }}">
-                    📺 {{ c.season_count or 0 }} сезон(ов)
-                    {% if c.next_season_date_human %} · следующий: {{ c.next_season_date_human }}{% endif %}
-                </a>
-                {% if c.watch_label %}
-                <p class="watch-progress">📊 {{ c.watch_label }} эп. ({{ c.watch_percent }}%)</p>
-                {% endif %}
-                {% endif %}
-
-                {% if c.badge %}<span class="badge {{ 'out' if c.released else '' }}">{{ c.badge }}</span>{% endif %}
-                {% if c.updated_at %}<p class="updated-at">обновлено: {{ c.updated_at }}</p>{% endif %}
-
-                <form class="notify-toggle" method="post" action="/toggle-notify/{{ c.external_id }}?sort={{ sort }}">
-                    <label>
-                        <input type="checkbox" {% if c.notify_enabled %}checked{% endif %}
-                            onchange="this.form.submit()">
-                        🔔 Уведомления
-                    </label>
-                </form>
-            </div>
-        </article>
-        {% else %}
-        <p class="empty">Пока пусто. Введите название — карточка соберётся сама.</p>
-        {% endfor %}
-    </div>
-
-    <script>
-        async function pollProgress() {
-            try {
-                const r = await fetch('/refresh-status');
-                const d = await r.json();
-                const wrap = document.getElementById('progress-wrap');
-                const bar = document.getElementById('progress-bar');
-                const text = document.getElementById('progress-text');
-                if (d.running) {
-                    const pct = d.total > 0 ? Math.round(d.done / d.total * 100) : 0;
-                    bar.style.width = pct + '%';
-                    text.textContent = `Обновлено ${d.done} из ${d.total} (${pct}%)`;
-                    wrap.style.display = 'block';
-                    setTimeout(pollProgress, 2000);
-                } else {
-                    wrap.style.display = 'none';
-                }
-            } catch (e) {
-                console.error('Poll error:', e);
+{% block extra_js %}
+<script>
+    async function pollProgress() {
+        try {
+            const r = await fetch('/refresh-status');
+            const d = await r.json();
+            const wrap = document.getElementById('progress-wrap');
+            const bar = document.getElementById('progress-bar');
+            const text = document.getElementById('progress-text');
+            if (d.running) {
+                const pct = d.total > 0 ? Math.round(d.done / d.total * 100) : 0;
+                bar.style.width = pct + '%';
+                text.textContent = `Обновлено ${d.done} из ${d.total} (${pct}%)`;
+                wrap.style.display = 'block';
+                setTimeout(pollProgress, 2000);
+            } else {
+                wrap.style.display = 'none';
             }
+        } catch (e) {
+            console.error('Poll error:', e);
         }
-        pollProgress();
-    </script>
-</body>
-
-</html>
+    }
+    pollProgress();
+</script>
+{% endblock %}
