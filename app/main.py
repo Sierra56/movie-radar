@@ -1105,8 +1105,8 @@ async def index(request: Request, sort: str = "date",
     }
 
     return templates.TemplateResponse(
-        "index.html", {
-            "request": request, "cards": cards, "sort": sort,
+        request, "index.html", {
+            "cards": cards, "sort": sort,
             "sources": list(SOURCES.keys()),
             "default_source": request.cookies.get("source", "omdb"),
             "refresh_hours": get_refresh_hours(),
@@ -1195,8 +1195,7 @@ async def telegram_settings_page(request: Request, msg: str | None = None):
         "test-fail": "Не удалось отправить. Проверьте токен и chat_id.",
     }
     return templates.TemplateResponse(
-        "settings.html", {
-            "request": request,
+        request, "settings.html", {
             "tg": s,
             "message": messages.get(msg),
         })
@@ -1236,7 +1235,7 @@ async def telegram_test():
 async def log_page(request: Request):
     rows = db("SELECT * FROM updates_log ORDER BY created_at DESC LIMIT 200")
     return templates.TemplateResponse(
-        "log.html", {"request": request, "rows": [dict(r) for r in rows]})
+        request, "log.html", {"rows": [dict(r) for r in rows]})
 
 
 @app.get("/export.ics")
@@ -1297,8 +1296,7 @@ async def title_page(request: Request, external_id: str):
 
     show_watched, show_total = get_show_progress(external_id)
 
-    return templates.TemplateResponse("title.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "title.html", {
         "card": card,
         "seasons": season_list,
         "show_watched": show_watched,
@@ -1371,8 +1369,7 @@ async def season_page(request: Request, external_id: str, season_number: int):
 
     watched_count, total_count = get_season_progress(external_id, season_number)
 
-    return templates.TemplateResponse("season.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "season.html", {
         "card": card,
         "season": season,
         "episodes": episodes,
