@@ -43,7 +43,11 @@ class OmdbSource(Source):
     name = "omdb"
 
     async def _get(self, params: dict) -> dict:
-        async with httpx.AsyncClient(timeout=10) as client:
+        proxy = get_proxy_url()
+        client_kwargs = {"timeout": 10}
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        async with httpx.AsyncClient(**client_kwargs) as client:
             r = await client.get("https://www.omdbapi.com/",
                                  params={**params, "apikey": OMDB_KEY})
             r.raise_for_status()
@@ -100,7 +104,11 @@ class TmdbSource(Source):
 
     async def _get(self, path: str, params: dict | None = None) -> dict:
         params = {"api_key": TMDB_KEY, "language": "ru-RU", **(params or {})}
-        async with httpx.AsyncClient(timeout=10) as client:
+        proxy = get_proxy_url()
+        client_kwargs = {"timeout": 10}
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        async with httpx.AsyncClient(**client_kwargs) as client:
             r = await client.get(f"https://api.themoviedb.org/3{path}", params=params)
             r.raise_for_status()
             return r.json()
@@ -319,6 +327,12 @@ def get_refresh_hours() -> int:
         return max(1, min(168, int(v)))
     except ValueError:
         return REFRESH_HOURS_DEFAULT
+
+
+def get_proxy_url() -> str | None:
+    """Returns configured proxy URL or None."""
+    v = get_setting("proxy_url", "")
+    return v.strip() if v and v.strip() else None
 
 
 def get_telegram_settings() -> dict:
@@ -555,7 +569,11 @@ async def send_telegram(text: str) -> bool:
         return False
     url = f"https://api.telegram.org/bot{s['bot_token']}/sendMessage"
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        proxy = get_proxy_url()
+        client_kwargs = {"timeout": 10}
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        async with httpx.AsyncClient(**client_kwargs) as client:
             r = await client.post(url, json={
                 "chat_id": s["chat_id"],
                 "text": text,
@@ -980,6 +998,31 @@ async def refresh_single(external_id: str) -> bool:
               WHERE external_id=?""",
            (new_title, new_rd, new_poster, new_genres, external_id), write=True)
 
+    # Also refresh seasons/episodes for TMDB series
+    if row["type"] == "series" and src.name == "tmdb":
+        try:
+            tmdb_id = int(external_id.split(":")[1])
+            seasons = await src.fetch_seasons(tmdb_id)
+            new_seasons = save_seasons(external_id, seasons)
+            for ns in new_seasons:
+                await notify_new_season(new_title, ns["season_number"],
+                                        ns["release_date"])
+
+            new_episodes_all = []
+            for season in seasons:
+                try:
+                    episodes = await src.fetch_episodes(tmdb_id, season["season_number"])
+                    new_eps = save_episodes(external_id, season["season_number"], episodes)
+                    new_episodes_all.extend(new_eps)
+                    await asyncio.sleep(0.3)
+                except Exception:
+                    pass
+
+            if new_episodes_all:
+                await notify_new_episodes(new_title, new_episodes_all)
+        except Exception as e:
+            print(f"[refresh-single] Error refreshing seasons: {e}")
+
     if date_change:
         await notify_date_changes([date_change])
 
@@ -1201,9 +1244,14 @@ async def refresh_card(external_id: str, sort: str = "date"):
 async def settings_page(request: Request, msg: str | None = None):
     s = get_telegram_settings()
     log_rows = db("SELECT * FROM updates_log ORDER BY created_at DESC LIMIT 200")
+    proxy_url = get_setting("proxy_url", "") or ""
     messages = {
         "refresh-saved": "Период обновления сохранён.",
         "telegram-saved": "Настройки Telegram сохранены.",
+        "proxy-saved": "Настройки прокси сохранены.",
+        "proxy-ok": "Прокси работает! Соединение установлено.",
+        "proxy-fail": "Не удалось подключиться через прокси. Проверьте URL.",
+        "proxy-not-set": "Прокси не настроен. Укажите URL прокси.",
         "test-ok": "Тестовое сообщение отправлено!",
         "test-fail": "Не удалось отправить. Проверьте токен и chat_id.",
     }
@@ -1213,6 +1261,7 @@ async def settings_page(request: Request, msg: str | None = None):
             "refresh_hours": get_refresh_hours(),
             "refresh_label": refresh_period_label(get_refresh_hours()),
             "log_rows": [dict(r) for r in log_rows],
+            "proxy_url": proxy_url,
             "message": messages.get(msg),
         })
 
@@ -1224,6 +1273,29 @@ async def set_refresh_interval(hours: int = Form(...)):
     scheduler.reschedule_job("refresh", trigger="interval", hours=hours)
     print(f"[settings] Refresh interval changed to {hours}h")
     return RedirectResponse("/settings?msg=refresh-saved", status_code=303)
+
+
+@app.post("/settings/proxy")
+async def save_proxy(proxy_url: str = Form("")):
+    set_setting("proxy_url", proxy_url.strip())
+    print(f"[settings] Proxy URL set: {proxy_url.strip() or '(none)'}")
+    return RedirectResponse("/settings?msg=proxy-saved", status_code=303)
+
+
+@app.post("/settings/proxy/test")
+async def test_proxy():
+    proxy = get_proxy_url()
+    if not proxy:
+        return RedirectResponse("/settings?msg=proxy-not-set", status_code=303)
+    try:
+        async with httpx.AsyncClient(proxy=proxy, timeout=10) as client:
+            r = await client.get("https://www.omdbapi.com/",
+                                 params={"apikey": "test", "t": "test"})
+            print(f"[proxy] Test succeeded, status={r.status_code}")
+            return RedirectResponse("/settings?msg=proxy-ok", status_code=303)
+    except Exception as e:
+        print(f"[proxy] Test failed: {e}")
+        return RedirectResponse("/settings?msg=proxy-fail", status_code=303)
 
 
 @app.post("/settings/telegram")

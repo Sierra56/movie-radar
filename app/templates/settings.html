@@ -39,6 +39,13 @@
         margin-top: 4px;
     }
 
+    .field .hint code {
+        background: #0c0f14;
+        padding: 1px 5px;
+        border-radius: 4px;
+        font-size: 12px;
+    }
+
     .check-row {
         display: flex;
         align-items: center;
@@ -128,6 +135,25 @@
         </div>
         <div class="btn-row">
             <button type="submit">Сохранить</button>
+        </div>
+    </form>
+</div>
+
+<div class="section">
+    <h2>🌐 Прокси</h2>
+    <form method="post" action="/settings/proxy">
+        <div class="field">
+            <label>URL прокси-сервера</label>
+            <input type="text" name="proxy_url" value="{{ proxy_url }}" placeholder="http://proxy.example.com:8080">
+            <p class="hint">
+                Форматы: <code>http://host:port</code>, <code>http://user:pass@host:port</code>,
+                <code>socks5://host:port</code> (требует <code>pip install httpx[socks]</code>).
+                Оставьте пустым, чтобы не использовать прокси. Прокси применяется к запросам OMDB, TMDB и Telegram.
+            </p>
+        </div>
+        <div class="btn-row">
+            <button type="submit">Сохранить</button>
+            <button type="submit" formaction="/settings/proxy/test" class="secondary">🔍 Проверить подключение</button>
         </div>
     </form>
 </div>

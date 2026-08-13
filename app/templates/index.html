@@ -137,12 +137,25 @@
         height: 28px;
         padding: 0;
         border-radius: 50%;
-        background: rgba(0, 0, 0, .55);
         font-size: 14px;
+        border: 0;
+        cursor: pointer;
     }
 
-    .card-actions button:hover {
-        background: rgba(0, 0, 0, .8);
+    .card-actions .btn-refresh {
+        background: rgba(79, 140, 255, 0.75);
+    }
+
+    .card-actions .btn-refresh:hover {
+        background: rgba(79, 140, 255, 0.95);
+    }
+
+    .card-actions .btn-delete {
+        background: rgba(0, 0, 0, 0.55);
+    }
+
+    .card-actions .btn-delete:hover {
+        background: rgba(255, 80, 80, 0.75);
     }
 
     .empty {
@@ -272,11 +285,11 @@
         <div class="card-actions">
             {% if c.source != 'local' %}
             <form method="post" action="/refresh/{{ c.external_id }}?sort={{ sort }}">
-                <button title="Обновить карточку">🔄</button>
+                <button title="Обновить информацию из {{ c.source|upper }}" class="btn-refresh">🔄</button>
             </form>
             {% endif %}
             <form method="post" action="/delete/{{ c.external_id }}?sort={{ sort }}">
-                <button title="Удалить">×</button>
+                <button title="Удалить" class="btn-delete">×</button>
             </form>
         </div>
 

@@ -39,10 +39,20 @@
         }
 
         .sidebar .brand {
+            display: block;
             font-size: 18px;
             font-weight: 600;
             margin-bottom: 28px;
-            padding: 0 10px;
+            padding: 6px 10px;
+            text-decoration: none;
+            color: #e9ecf3;
+            border-radius: 8px;
+            transition: background .15s, color .15s;
+        }
+
+        .sidebar .brand:hover {
+            background: #1a1f2b;
+            color: #4f8cff;
         }
 
         .sidebar nav {
@@ -149,10 +159,6 @@
                 height: auto;
             }
 
-            .sidebar .brand {
-                display: none;
-            }
-
             .sidebar nav {
                 flex-direction: row;
                 gap: 4px;
@@ -163,6 +169,10 @@
                 justify-content: center;
                 padding: 8px 10px;
                 font-size: 13px;
+            }
+
+            .sidebar .brand {
+                display: none;
             }
 
             .content {
@@ -176,7 +186,7 @@
 <body>
     <div class="layout">
         <aside class="sidebar">
-            <div class="brand">🎬 Movie Radar</div>
+            <a href="/" class="brand">🎬 Movie Radar</a>
             <nav>
                 <a href="/" class="{% if request.url.path == '/' %}active{% endif %}">📋 Список</a>
                 <a href="/new" class="{% if request.url.path == '/new' %}active{% endif %}">➕ Добавить</a>
