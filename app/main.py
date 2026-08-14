@@ -1,8 +1,12 @@
 import os
+import io
+import json
 import sqlite3
 import asyncio
 import uuid
 import hashlib
+import zipfile
+import tempfile
 from abc import ABC, abstractmethod
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
@@ -10,8 +14,8 @@ from pathlib import Path
 from urllib.parse import quote, urlparse
 
 import httpx
-from fastapi import FastAPI, Form, Request, Response, BackgroundTasks
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi import FastAPI, Form, Request, Response, BackgroundTasks, UploadFile, File
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -34,6 +38,11 @@ MONTHS_RU = ["января", "февраля", "марта", "апреля", "м
 
 refresh_progress = {"running": False, "done": 0, "total": 0}
 
+# Backup constants
+BACKUP_VERSION = "1.0.0"
+SETTINGS_TABLES = ["settings", "telegram_settings"]
+CARD_TABLES = ["titles", "seasons", "episodes", "watched_episodes", "updates_log"]
+
 
 # ── Image helpers ─────────────────────────────────────
 def sanitize_id(external_id: str) -> str:
@@ -41,7 +50,6 @@ def sanitize_id(external_id: str) -> str:
 
 
 def parse_tmdb_id(external_id: str) -> int | None:
-    """Extract numeric TMDB id. Supports 'tmdb:123' and 'tmdb:movie:123'/'tmdb:tv:123'."""
     if not external_id or not external_id.startswith("tmdb:"):
         return None
     parts = external_id.split(":")
@@ -59,7 +67,6 @@ def parse_tmdb_id(external_id: str) -> int | None:
 
 
 def parse_tmdb_type(external_id: str) -> str | None:
-    """Returns 'movie' or 'tv' if encoded in external_id, else None."""
     if not external_id or not external_id.startswith("tmdb:"):
         return None
     parts = external_id.split(":")
@@ -266,13 +273,11 @@ class TmdbSource(Source):
         if tmdb_id is None:
             return None
         tmdb_type = parse_tmdb_type(external_id)
-        # Type is known — fetch the exact endpoint
         if tmdb_type:
             try:
                 return await self._details(tmdb_type, tmdb_id)
             except httpx.HTTPStatusError:
                 return None
-        # Legacy format without type — fall back to guessing
         try:
             return await self._details("movie", tmdb_id)
         except httpx.HTTPStatusError:
@@ -1242,6 +1247,186 @@ def build_ics(cards: list[dict]) -> str:
     return "\r\n".join(lines)
 
 
+# ── Backup / Restore ──────────────────────────────────
+def _build_backup_zip(include_settings: bool, include_cards: bool,
+                      include_images: bool) -> io.BytesIO:
+    """Create a consistent backup ZIP. Returns BytesIO ready to read."""
+    tmp_db_fd, tmp_db_path = tempfile.mkstemp(suffix=".db")
+    os.close(tmp_db_fd)
+    try:
+        # Consistent snapshot via SQLite backup API
+        src_conn = sqlite3.connect(DB_PATH)
+        dst_conn = sqlite3.connect(tmp_db_path)
+        src_conn.backup(dst_conn)
+        src_conn.close()
+
+        # Drop tables that are not included in this backup
+        if not include_settings:
+            for t in SETTINGS_TABLES:
+                dst_conn.execute(f"DROP TABLE IF EXISTS {t}")
+        if not include_cards:
+            for t in CARD_TABLES:
+                dst_conn.execute(f"DROP TABLE IF EXISTS {t}")
+        dst_conn.commit()
+        dst_conn.close()
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            meta = {
+                "app": "movie-radar",
+                "backup_version": BACKUP_VERSION,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "include_settings": include_settings,
+                "include_cards": include_cards,
+                "include_images": include_images,
+            }
+            zf.writestr("meta.json", json.dumps(meta, ensure_ascii=False, indent=2))
+            zf.write(tmp_db_path, "backup.db")
+
+            if include_images and os.path.isdir(POSTERS_DIR):
+                for root, _, files in os.walk(POSTERS_DIR):
+                    for fn in files:
+                        full = os.path.join(root, fn)
+                        rel = os.path.relpath(full, POSTERS_DIR)
+                        arcname = os.path.join("posters", rel)
+                        zf.write(full, arcname)
+
+        buffer.seek(0)
+        return buffer
+    finally:
+        if os.path.exists(tmp_db_path):
+            os.remove(tmp_db_path)
+
+
+@app.post("/backup/create")
+async def create_backup(include_settings: str = Form("off"),
+                        include_cards: str = Form("off"),
+                        include_images: str = Form("off")):
+    inc_settings = include_settings == "on"
+    inc_cards = include_cards == "on"
+    inc_images = include_images == "on"
+
+    if not (inc_settings or inc_cards or inc_images):
+        return RedirectResponse("/settings?msg=backup-empty", status_code=303)
+
+    buffer = _build_backup_zip(inc_settings, inc_cards, inc_images)
+    filename = f"movie-radar-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.zip"
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@app.post("/backup/restore")
+async def restore_backup(file: UploadFile = File(...)):
+    if not file.filename or not file.filename.lower().endswith(".zip"):
+        return RedirectResponse("/settings?msg=restore-invalid", status_code=303)
+
+    content = await file.read()
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(content))
+    except zipfile.BadZipFile:
+        return RedirectResponse("/settings?msg=restore-invalid", status_code=303)
+
+    names = zf.namelist()
+    if "meta.json" not in names or "backup.db" not in names:
+        return RedirectResponse("/settings?msg=restore-invalid", status_code=303)
+
+    try:
+        meta = json.loads(zf.read("meta.json"))
+    except (json.JSONDecodeError, KeyError):
+        return RedirectResponse("/settings?msg=restore-invalid", status_code=303)
+
+    # Pause scheduler so nothing writes during restore
+    scheduler.pause()
+    tmp_path = None
+    try:
+        # Auto-backup current state before overwriting
+        try:
+            auto_buffer = _build_backup_zip(True, True, True)
+            auto_path = os.path.join(os.path.dirname(DB_PATH), "auto-backup-latest.zip")
+            with open(auto_path, "wb") as f:
+                f.write(auto_buffer.read())
+            print(f"[backup] Auto-backup saved to {auto_path}")
+        except Exception as e:
+            print(f"[backup] Auto-backup failed (continuing): {e}")
+
+        # Extract backup.db to a temp file
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".db")
+        os.close(tmp_fd)
+        with zf.open("backup.db") as src, open(tmp_path, "wb") as dst:
+            dst.write(src.read())
+
+        include_settings = meta.get("include_settings", False)
+        include_cards = meta.get("include_cards", False)
+
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            conn.execute("ATTACH DATABASE ? AS backup", (tmp_path,))
+
+            tables_to_restore = []
+            if include_settings:
+                tables_to_restore.extend(SETTINGS_TABLES)
+            if include_cards:
+                tables_to_restore.extend(CARD_TABLES)
+
+            for table in tables_to_restore:
+                row = conn.execute(
+                    "SELECT name FROM backup.sqlite_master WHERE type='table' AND name=?",
+                    (table,)).fetchone()
+                if not row:
+                    continue
+                conn.execute(f"DELETE FROM main.{table}")
+                conn.execute(f"INSERT INTO main.{table} SELECT * FROM backup.{table}")
+                # Fix autoincrement sequence so new inserts don't collide
+                has_seq = conn.execute(
+                    "SELECT 1 FROM backup.sqlite_sequence WHERE name=?",
+                    (table,)).fetchone()
+                if has_seq:
+                    max_id = conn.execute(
+                        f"SELECT MAX(id) FROM main.{table}").fetchone()[0] or 0
+                    conn.execute(
+                        "DELETE FROM main.sqlite_sequence WHERE name=?", (table,))
+                    conn.execute(
+                        "INSERT INTO main.sqlite_sequence (name, seq) VALUES (?,?)",
+                        (table, max_id))
+
+            conn.execute("DETACH DATABASE backup")
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Restore images
+        if meta.get("include_images", False):
+            os.makedirs(POSTERS_DIR, exist_ok=True)
+            for name in names:
+                if name.startswith("posters/") and not name.endswith("/"):
+                    rel = os.path.relpath(name, "posters")
+                    target = os.path.join(POSTERS_DIR, rel)
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    with zf.open(name) as src, open(target, "wb") as dst:
+                        dst.write(src.read())
+
+        # Re-apply restored settings (refresh period, telegram schedule)
+        try:
+            scheduler.reschedule_job("refresh", trigger="interval",
+                                     hours=get_refresh_hours())
+            schedule_telegram_job()
+        except Exception as e:
+            print(f"[backup] Error re-applying settings: {e}")
+
+    except Exception as e:
+        print(f"[backup] Restore error: {e}")
+        return RedirectResponse("/settings?msg=restore-error", status_code=303)
+    finally:
+        scheduler.resume()
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+    return RedirectResponse("/settings?msg=restore-ok", status_code=303)
+
+
 # ── Image proxy route ─────────────────────────────────
 _ALLOWED_IMG_HOSTS = {
     "image.tmdb.org",
@@ -1476,6 +1661,10 @@ async def settings_page(request: Request, msg: str | None = None):
         "theme-saved": "Тема сохранена.",
         "test-ok": "Тестовое сообщение отправлено!",
         "test-fail": "Не удалось отправить. Проверьте токен и chat_id.",
+        "backup-empty": "Выберите хотя бы один компонент для бэкапа.",
+        "restore-ok": "Восстановление завершено. Данные заменены из бэкапа.",
+        "restore-invalid": "Неверный файл бэкапа. Ожидается архив movie-radar.",
+        "restore-error": "Ошибка при восстановлении. Проверьте файл.",
     }
     return templates.TemplateResponse(
         request, "settings.html", {

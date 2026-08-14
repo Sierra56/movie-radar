@@ -15,6 +15,12 @@
         margin-bottom: 16px;
     }
 
+    .section h3 {
+        font-size: 15px;
+        margin: 16px 0 10px;
+        color: var(--text-muted);
+    }
+
     .field {
         display: flex;
         flex-direction: column;
@@ -69,6 +75,12 @@
         font-size: 13px;
         color: var(--text-dim);
         margin-top: 12px;
+    }
+
+    .warning-text {
+        font-size: 13px;
+        color: var(--error);
+        margin-top: 8px;
     }
 
     .log-table {
@@ -275,6 +287,45 @@
 </div>
 
 <div class="section">
+    <h2>💾 Бэкап и восстановление</h2>
+
+    <h3>Создать бэкап</h3>
+    <form method="post" action="/backup/create">
+        <div class="check-row">
+            <input type="checkbox" name="include_settings" id="bk-settings" checked>
+            <label for="bk-settings">Настройки (тема, период, прокси, Telegram)</label>
+        </div>
+        <div class="check-row">
+            <input type="checkbox" name="include_cards" id="bk-cards" checked>
+            <label for="bk-cards">Фильмы и сериалы (карточки, сезоны, эпизоды, прогресс)</label>
+        </div>
+        <div class="check-row">
+            <input type="checkbox" name="include_images" id="bk-images" checked>
+            <label for="bk-images">Картинки (постеры, кадры)</label>
+        </div>
+        <div class="btn-row">
+            <button type="submit">📥 Скачать бэкап (.zip)</button>
+        </div>
+    </form>
+
+    <h3>Восстановление из бэкапа</h3>
+    <form method="post" action="/backup/restore" enctype="multipart/form-data" onsubmit="return confirmRestore()">
+        <div class="field">
+            <label for="restore-file">Файл бэкапа (.zip)</label>
+            <input type="file" name="file" id="restore-file" accept=".zip" required>
+            <p class="warning-text">
+                ⚠️ Текущие данные будут заменены данными из бэкапа.
+                Перед восстановлением автоматически создаётся страховочная копия
+                (auto-backup-latest.zip в папке data).
+            </p>
+        </div>
+        <div class="btn-row">
+            <button type="submit" class="secondary">📤 Восстановить</button>
+        </div>
+    </form>
+</div>
+
+<div class="section">
     <h2>📋 Журнал обновлений</h2>
     {% if log_rows %}
     <table class="log-table">
@@ -303,4 +354,12 @@
     <p class="empty">Журнал пуст. Изменения появятся после первого обновления карточек.</p>
     {% endif %}
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function confirmRestore() {
+        return confirm("ВНИМАНИЕ: Текущие данные будут заменены данными из бэкапа.\n\nПеред восстановлением будет создана страховочная копия (auto-backup-latest.zip).\n\nПродолжить?");
+    }
+</script>
 {% endblock %}
