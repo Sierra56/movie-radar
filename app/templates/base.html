@@ -6,19 +6,87 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Movie Radar{% endblock %}</title>
     <style>
+        :root,
+        body[data-theme="dark"] {
+            --bg: #10131a;
+            --bg-card: #1a1f2b;
+            --bg-sidebar: #0c0f14;
+            --bg-input: #1a1f2b;
+            --bg-hover: #2a3140;
+            --bg-section: #1a1f2b;
+            --text: #e9ecf3;
+            --text-muted: #9aa3b8;
+            --text-dim: #6a7389;
+            --text-faint: #5a6378;
+            --border: #2a3140;
+            --border-light: #343d4f;
+            --accent: #4f8cff;
+            --accent-hover: #3a78eb;
+            --accent-bg: #274067;
+            --accent-text: #bcd4ff;
+            --success: #7bd88f;
+            --error: #ff7b7b;
+            --warning-bg: #3a2a2a;
+            --warning-text: #ffb4b4;
+            --overlay: rgba(0, 0, 0, .55);
+            --tag-bg: rgba(0, 0, 0, .6);
+            --no-poster-bg: #232a39;
+            --no-poster-text: #8b93a7;
+            --code-bg: #0c0f14;
+            --progress-bg: #2a3140;
+            --refresh-btn-bg: rgba(79, 140, 255, .75);
+            --refresh-btn-hover: rgba(79, 140, 255, .95);
+            --delete-btn-bg: rgba(0, 0, 0, .55);
+            --delete-btn-hover: rgba(255, 80, 80, .75);
+        }
+
+        body[data-theme="light"] {
+            --bg: #f5f6f8;
+            --bg-card: #ffffff;
+            --bg-sidebar: #e8eaed;
+            --bg-input: #ffffff;
+            --bg-hover: #d5d9e0;
+            --bg-section: #ffffff;
+            --text: #1a1d24;
+            --text-muted: #5a6378;
+            --text-dim: #7a8296;
+            --text-faint: #8b93a7;
+            --border: #d0d4dc;
+            --border-light: #c0c5d0;
+            --accent: #2563eb;
+            --accent-hover: #1d4ed8;
+            --accent-bg: #dbeafe;
+            --accent-text: #1e40af;
+            --success: #16a34a;
+            --error: #dc2626;
+            --warning-bg: #fee2e2;
+            --warning-text: #991b1b;
+            --overlay: rgba(0, 0, 0, .35);
+            --tag-bg: rgba(0, 0, 0, .5);
+            --no-poster-bg: #e5e7eb;
+            --no-poster-text: #9ca3af;
+            --code-bg: #e5e7eb;
+            --progress-bg: #d1d5db;
+            --refresh-btn-bg: rgba(37, 99, 235, .75);
+            --refresh-btn-hover: rgba(37, 99, 235, .95);
+            --delete-btn-bg: rgba(0, 0, 0, .35);
+            --delete-btn-hover: rgba(220, 38, 38, .75);
+        }
+
         * {
             box-sizing: border-box;
             margin: 0;
         }
 
         body {
-            background: #10131a;
-            color: #e9ecf3;
+            background: var(--bg);
+            color: var(--text);
             font: 16px/1.4 system-ui, sans-serif;
+            transition: background .2s, color .2s;
         }
 
         a {
-            color: #4f8cff;
+            color: var(--accent);
         }
 
         .layout {
@@ -28,9 +96,9 @@
 
         .sidebar {
             width: 240px;
-            background: #0c0f14;
+            background: var(--bg-sidebar);
             padding: 24px 16px;
-            border-right: 1px solid #1a1f2b;
+            border-right: 1px solid var(--border);
             flex-shrink: 0;
             position: sticky;
             top: 0;
@@ -45,14 +113,14 @@
             margin-bottom: 28px;
             padding: 6px 10px;
             text-decoration: none;
-            color: #e9ecf3;
+            color: var(--text);
             border-radius: 8px;
             transition: background .15s, color .15s;
         }
 
         .sidebar .brand:hover {
-            background: #1a1f2b;
-            color: #4f8cff;
+            background: var(--bg-hover);
+            color: var(--accent);
         }
 
         .sidebar nav {
@@ -68,18 +136,18 @@
             padding: 10px 12px;
             border-radius: 8px;
             text-decoration: none;
-            color: #9aa3b8;
+            color: var(--text-muted);
             font-size: 15px;
         }
 
         .sidebar nav a:hover {
-            background: #1a1f2b;
-            color: #e9ecf3;
+            background: var(--bg-hover);
+            color: var(--text);
         }
 
         .sidebar nav a.active {
-            background: #274067;
-            color: #fff;
+            background: var(--accent-bg);
+            color: var(--text);
         }
 
         .content {
@@ -94,12 +162,12 @@
         }
 
         .error {
-            color: #ff7b7b;
+            color: var(--error);
             margin: 8px 0;
         }
 
         .message {
-            color: #7bd88f;
+            color: var(--success);
             margin: 8px 0;
         }
 
@@ -107,22 +175,23 @@
             padding: 10px 18px;
             border: 0;
             border-radius: 8px;
-            background: #4f8cff;
+            background: var(--accent);
             color: #fff;
             cursor: pointer;
             font-size: 14px;
         }
 
         button:hover {
-            background: #3a78eb;
+            background: var(--accent-hover);
         }
 
         button.secondary {
-            background: #2a3140;
+            background: var(--bg-hover);
+            color: var(--text);
         }
 
         button.secondary:hover {
-            background: #343d4f;
+            background: var(--border-light);
         }
 
         button.small {
@@ -134,9 +203,9 @@
         select {
             padding: 10px 12px;
             border-radius: 8px;
-            border: 1px solid #2a3140;
-            background: #1a1f2b;
-            color: inherit;
+            border: 1px solid var(--border);
+            background: var(--bg-input);
+            color: var(--text);
             font-size: 15px;
         }
 
@@ -153,7 +222,7 @@
             .sidebar {
                 width: 100%;
                 border-right: 0;
-                border-bottom: 1px solid #1a1f2b;
+                border-bottom: 1px solid var(--border);
                 padding: 14px 12px;
                 position: static;
                 height: auto;
@@ -183,7 +252,7 @@
     {% block extra_css %}{% endblock %}
 </head>
 
-<body>
+<body data-theme="{{ get_theme() }}">
     <div class="layout">
         <aside class="sidebar">
             <a href="/" class="brand">🎬 Movie Radar</a>

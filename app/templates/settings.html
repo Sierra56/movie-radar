@@ -4,7 +4,7 @@
 {% block extra_css %}
 <style>
     .section {
-        background: #1a1f2b;
+        background: var(--bg-section);
         padding: 20px 24px;
         border-radius: 12px;
         margin-bottom: 20px;
@@ -24,7 +24,7 @@
 
     .field label {
         font-size: 14px;
-        color: #9aa3b8;
+        color: var(--text-muted);
         margin-bottom: 6px;
     }
 
@@ -35,12 +35,12 @@
 
     .field .hint {
         font-size: 13px;
-        color: #6a7389;
+        color: var(--text-dim);
         margin-top: 4px;
     }
 
     .field .hint code {
-        background: #0c0f14;
+        background: var(--code-bg);
         padding: 1px 5px;
         border-radius: 4px;
         font-size: 12px;
@@ -67,7 +67,7 @@
 
     .last-sent {
         font-size: 13px;
-        color: #6a7389;
+        color: var(--text-dim);
         margin-top: 12px;
     }
 
@@ -82,31 +82,31 @@
     .log-table td {
         padding: 8px 12px;
         text-align: left;
-        border-bottom: 1px solid #2a3140;
+        border-bottom: 1px solid var(--border);
     }
 
     .log-table th {
-        color: #9aa3b8;
+        color: var(--text-muted);
         font-weight: 600;
     }
 
     .log-table td.old {
-        color: #ff7b7b;
+        color: var(--error);
     }
 
     .log-table td.new {
-        color: #7bd88f;
+        color: var(--success);
     }
 
     .field-name {
-        background: #0c0f14;
+        background: var(--code-bg);
         padding: 2px 6px;
         border-radius: 4px;
         font-size: 12px;
     }
 
     .empty {
-        color: #9aa3b8;
+        color: var(--text-muted);
         margin-top: 8px;
     }
 </style>
@@ -116,6 +116,22 @@
 <h1 class="page-title">⚙ Настройки</h1>
 
 {% if message %}<p class="message">{{ message }}</p>{% endif %}
+
+<div class="section">
+    <h2>🎨 Тема оформления</h2>
+    <form method="post" action="/settings/theme">
+        <div class="field">
+            <label>Тема интерфейса</label>
+            <select name="theme">
+                <option value="dark" {% if theme=='dark' %}selected{% endif %}>Тёмная</option>
+                <option value="light" {% if theme=='light' %}selected{% endif %}>Светлая</option>
+            </select>
+        </div>
+        <div class="btn-row">
+            <button type="submit">Сохранить</button>
+        </div>
+    </form>
+</div>
 
 <div class="section">
     <h2>🔄 Автообновление</h2>
@@ -230,7 +246,7 @@
 
 <div class="section">
     <h2>🧪 Тестирование уведомлений</h2>
-    <p style="font-size:13px; color:#9aa3b8; margin-bottom:14px">
+    <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px">
         Отправьте тестовые сообщения каждого типа, чтобы убедиться что всё работает.
         Тесты отправляются независимо от переключателей уведомлений.
     </p>

@@ -9,7 +9,8 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Form, Request, Response, BackgroundTasks
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -22,10 +23,53 @@ REFRESH_HOURS_DEFAULT = int(os.getenv("REFRESH_HOURS", "12"))
 app = FastAPI()
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
+# Posters storage
+POSTERS_DIR = os.path.join(os.path.dirname(DB_PATH), "posters")
+os.makedirs(POSTERS_DIR, exist_ok=True)
+app.mount("/posters", StaticFiles(directory=POSTERS_DIR), name="posters")
+
 MONTHS_RU = ["января", "февраля", "марта", "апреля", "мая", "июня",
              "июля", "августа", "сентября", "октября", "ноября", "декабря"]
 
 refresh_progress = {"running": False, "done": 0, "total": 0}
+
+
+# ── Image helpers ─────────────────────────────────────
+def sanitize_id(external_id: str) -> str:
+    return external_id.replace(":", "_").replace("/", "_")
+
+
+async def download_image(url: str, filename: str) -> str | None:
+    """Download image and save locally. Returns local path or None."""
+    if not url:
+        return None
+    os.makedirs(POSTERS_DIR, exist_ok=True)
+    local_path = os.path.join(POSTERS_DIR, filename)
+    if os.path.exists(local_path):
+        return f"/posters/{filename}"
+    try:
+        proxy = get_proxy_url()
+        client_kwargs = {"timeout": 15, "follow_redirects": True}
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        async with httpx.AsyncClient(**client_kwargs) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            with open(local_path, "wb") as f:
+                f.write(r.content)
+        return f"/posters/{filename}"
+    except Exception as e:
+        print(f"[download] Error downloading {url}: {e}")
+        return None
+
+
+async def download_card_poster(info: dict) -> str | None:
+    url = info.get("poster_url")
+    if not url:
+        return None
+    filename = f"{sanitize_id(info['external_id'])}.jpg"
+    local = await download_image(url, filename)
+    return local or url
 
 
 # ── Source abstraction ────────────────────────────────
@@ -37,6 +81,9 @@ class Source(ABC):
 
     @abstractmethod
     async def fetch(self, external_id: str) -> dict | None: ...
+
+    @abstractmethod
+    async def search_candidates(self, query: str) -> list[dict]: ...
 
 
 class OmdbSource(Source):
@@ -97,10 +144,28 @@ class OmdbSource(Source):
             return None
         return self._to_card(detail)
 
+    async def search_candidates(self, query: str) -> list[dict]:
+        data = await self._get({"s": query})
+        if data.get("Response") != "True":
+            return []
+        candidates = []
+        for r in data["Search"]:
+            poster = r.get("Poster")
+            candidates.append({
+                "external_id": r["imdbID"],
+                "title": r["Title"],
+                "year": r.get("Year", ""),
+                "type": r.get("Type"),
+                "poster_url": poster if poster and poster != "N/A" else None,
+                "source": "omdb",
+            })
+        return candidates
+
 
 class TmdbSource(Source):
     name = "tmdb"
     _POSTER = "https://image.tmdb.org/t/p/w342"
+    _POSTER_SMALL = "https://image.tmdb.org/t/p/w154"
 
     async def _get(self, path: str, params: dict | None = None) -> dict:
         params = {"api_key": TMDB_KEY, "language": "ru-RU", **(params or {})}
@@ -175,6 +240,28 @@ class TmdbSource(Source):
             return await self._details("tv", tmdb_id)
         except httpx.HTTPStatusError:
             return None
+
+    async def search_candidates(self, query: str) -> list[dict]:
+        data = await self._get("/search/multi", {"query": query})
+        results = data.get("results") or []
+        candidates = []
+        for r in results:
+            mt = r.get("media_type")
+            if mt not in ("movie", "tv"):
+                continue
+            title = r.get("title") or r.get("name") or ""
+            rel = r.get("release_date") or r.get("first_air_date") or ""
+            year = rel[:4] if rel else ""
+            poster = f"{self._POSTER_SMALL}{r['poster_path']}" if r.get("poster_path") else None
+            candidates.append({
+                "external_id": f"tmdb:{r['id']}",
+                "title": title,
+                "year": year,
+                "type": "movie" if mt == "movie" else "series",
+                "poster_url": poster,
+                "source": "tmdb",
+            })
+        return candidates
 
     async def fetch_seasons(self, tmdb_id: int) -> list[dict]:
         d = await self._get(f"/tv/{tmdb_id}")
@@ -330,9 +417,12 @@ def get_refresh_hours() -> int:
 
 
 def get_proxy_url() -> str | None:
-    """Returns configured proxy URL or None."""
     v = get_setting("proxy_url", "")
     return v.strip() if v and v.strip() else None
+
+
+def get_theme() -> str:
+    return get_setting("theme", "dark")
 
 
 def get_telegram_settings() -> dict:
@@ -354,6 +444,10 @@ def save_telegram_settings(bot_token: str, chat_id: str, enabled: bool,
         1 if notify_new_cards else 0, 1 if notify_new_seasons else 0,
         1 if notify_new_episodes else 0),
        write=True)
+
+
+# Expose theme to all templates
+templates.env.globals["get_theme"] = get_theme
 
 
 # ── Update log ────────────────────────────────────────
@@ -410,29 +504,34 @@ def progress_percent(watched: int, total: int) -> int:
 
 
 # ── Seasons & episodes helpers ────────────────────────
-def save_seasons(title_external_id: str, seasons: list[dict]) -> list[dict]:
+async def save_seasons(title_external_id: str, seasons: list[dict]) -> list[dict]:
     existing = db("SELECT season_number FROM seasons WHERE title_external_id=?",
                   (title_external_id,))
     existing_numbers = {r["season_number"] for r in existing}
 
     new_seasons = []
+    safe_id = sanitize_id(title_external_id)
     for s in seasons:
         if s["season_number"] not in existing_numbers:
             new_seasons.append(s)
 
-        poster = (f"https://image.tmdb.org/t/p/w342{s['poster_path']}"
-                  if s.get("poster_path") else None)
+        poster_local = None
+        if s.get("poster_path"):
+            url = f"https://image.tmdb.org/t/p/w342{s['poster_path']}"
+            filename = f"{safe_id}_s{s['season_number']}.jpg"
+            poster_local = await download_image(url, filename) or url
+
         db("""INSERT OR REPLACE INTO seasons
               (title_external_id, season_number, name, release_date, episodes, poster_url)
               VALUES (?,?,?,?,?,?)""",
            (title_external_id, s["season_number"], s["name"],
-            s["release_date"], s["episodes"], poster), write=True)
+            s["release_date"], s["episodes"], poster_local), write=True)
 
     return new_seasons
 
 
-def save_episodes(title_external_id: str, season_number: int,
-                  episodes: list[dict]) -> list[dict]:
+async def save_episodes(title_external_id: str, season_number: int,
+                        episodes: list[dict]) -> list[dict]:
     rows = db("SELECT id FROM seasons WHERE title_external_id=? AND season_number=?",
               (title_external_id, season_number))
     if not rows:
@@ -444,6 +543,7 @@ def save_episodes(title_external_id: str, season_number: int,
     existing_numbers = {r["episode_number"] for r in existing}
 
     new_episodes = []
+    safe_id = sanitize_id(title_external_id)
     for e in episodes:
         if e["episode_number"] not in existing_numbers:
             new_episodes.append({
@@ -453,13 +553,17 @@ def save_episodes(title_external_id: str, season_number: int,
                 "release_date": e["release_date"],
             })
 
-        poster = (f"https://image.tmdb.org/t/p/w342{e['still_path']}"
-                  if e.get("still_path") else None)
+        poster_local = None
+        if e.get("still_path"):
+            url = f"https://image.tmdb.org/t/p/w300{e['still_path']}"
+            filename = f"{safe_id}_s{season_number}e{e['episode_number']}.jpg"
+            poster_local = await download_image(url, filename) or url
+
         db("""INSERT OR REPLACE INTO episodes
               (season_id, episode_number, name, release_date, runtime, overview, poster_url)
               VALUES (?,?,?,?,?,?,?)""",
            (season_id, e["episode_number"], e["name"], e["release_date"],
-            e["runtime"], e.get("overview", ""), poster), write=True)
+            e["runtime"], e.get("overview", ""), poster_local), write=True)
 
     return new_episodes
 
@@ -722,7 +826,6 @@ async def notify_new_episodes(show_title: str, new_eps: list[dict], force: bool 
 
 
 async def check_and_notify(force: bool = False):
-    """Scheduled job: sends upcoming releases (titles, seasons, episodes) to Telegram."""
     s = get_telegram_settings()
     if not force and (not s or not s.get("enabled")):
         return
@@ -836,7 +939,6 @@ async def refresh_catalog():
     for i, r in enumerate(rows):
         row = dict(r)
 
-        # Skip local cards — no API to refresh from
         if row["source"] == "local":
             refresh_progress["done"] = i + 1
             continue
@@ -871,7 +973,6 @@ async def refresh_catalog():
         changed = False
         new_title = fresh["title"] or row["title"]
         new_rd = fresh["release_date"] or row["release_date"]
-        new_poster = fresh["poster_url"] or row["poster_url"]
         new_genres = fresh["genres"] or row["genres"]
 
         if new_title != row["title"]:
@@ -888,29 +989,34 @@ async def refresh_catalog():
                     "new_date": new_rd,
                 })
             changed = True
-        if new_poster != row["poster_url"]:
-            log_update(row["external_id"], new_title, "poster_url",
-                       row["poster_url"], new_poster)
-            changed = True
         if new_genres != row["genres"]:
             log_update(row["external_id"], new_title, "genres",
                        row["genres"], new_genres)
             changed = True
 
-        if changed:
+        # Poster: download locally if available
+        poster_local = row["poster_url"]
+        if fresh.get("poster_url"):
+            filename = f"{sanitize_id(row['external_id'])}.jpg"
+            downloaded = await download_image(fresh["poster_url"], filename)
+            if downloaded:
+                poster_local = downloaded
+
+        if changed or poster_local != row["poster_url"]:
             db("""UPDATE titles SET
                     title=?, release_date=?, poster_url=?, genres=?,
                     updated_at=datetime('now')
                   WHERE external_id=?""",
-               (new_title, new_rd, new_poster, new_genres, row["external_id"]),
+               (new_title, new_rd, poster_local, new_genres, row["external_id"]),
                write=True)
-            updated += 1
+            if changed:
+                updated += 1
 
         if row["type"] == "series" and src.name == "tmdb":
             try:
                 tmdb_id = int(row["external_id"].split(":")[1])
                 seasons = await src.fetch_seasons(tmdb_id)
-                new_seasons = save_seasons(row["external_id"], seasons)
+                new_seasons = await save_seasons(row["external_id"], seasons)
                 await asyncio.sleep(0.5)
 
                 for ns in new_seasons:
@@ -922,8 +1028,8 @@ async def refresh_catalog():
                     try:
                         episodes = await src.fetch_episodes(tmdb_id,
                                                             season["season_number"])
-                        new_eps = save_episodes(row["external_id"],
-                                                season["season_number"], episodes)
+                        new_eps = await save_episodes(row["external_id"],
+                                                      season["season_number"], episodes)
                         new_episodes_all.extend(new_eps)
                         await asyncio.sleep(0.5)
                     except Exception as e:
@@ -966,7 +1072,6 @@ async def refresh_single(external_id: str) -> bool:
     changed = False
     new_title = fresh["title"] or row["title"]
     new_rd = fresh["release_date"] or row["release_date"]
-    new_poster = fresh["poster_url"] or row["poster_url"]
     new_genres = fresh["genres"] or row["genres"]
     date_change = None
 
@@ -983,27 +1088,29 @@ async def refresh_single(external_id: str) -> bool:
                 "new_date": new_rd,
             }
         changed = True
-    if new_poster != row["poster_url"]:
-        log_update(external_id, new_title, "poster_url",
-                   row["poster_url"], new_poster)
-        changed = True
     if new_genres != row["genres"]:
         log_update(external_id, new_title, "genres", row["genres"], new_genres)
         changed = True
 
-    if changed:
+    poster_local = row["poster_url"]
+    if fresh.get("poster_url"):
+        filename = f"{sanitize_id(external_id)}.jpg"
+        downloaded = await download_image(fresh["poster_url"], filename)
+        if downloaded:
+            poster_local = downloaded
+
+    if changed or poster_local != row["poster_url"]:
         db("""UPDATE titles SET
                 title=?, release_date=?, poster_url=?, genres=?,
                 updated_at=datetime('now')
               WHERE external_id=?""",
-           (new_title, new_rd, new_poster, new_genres, external_id), write=True)
+           (new_title, new_rd, poster_local, new_genres, external_id), write=True)
 
-    # Also refresh seasons/episodes for TMDB series
     if row["type"] == "series" and src.name == "tmdb":
         try:
             tmdb_id = int(external_id.split(":")[1])
             seasons = await src.fetch_seasons(tmdb_id)
-            new_seasons = save_seasons(external_id, seasons)
+            new_seasons = await save_seasons(external_id, seasons)
             for ns in new_seasons:
                 await notify_new_season(new_title, ns["season_number"],
                                         ns["release_date"])
@@ -1012,7 +1119,7 @@ async def refresh_single(external_id: str) -> bool:
             for season in seasons:
                 try:
                     episodes = await src.fetch_episodes(tmdb_id, season["season_number"])
-                    new_eps = save_episodes(external_id, season["season_number"], episodes)
+                    new_eps = await save_episodes(external_id, season["season_number"], episodes)
                     new_episodes_all.extend(new_eps)
                     await asyncio.sleep(0.3)
                 except Exception:
@@ -1161,66 +1268,85 @@ async def index(request: Request, sort: str = "date",
 @app.get("/new", response_class=HTMLResponse)
 async def new_card_page(request: Request, msg: str | None = None):
     messages = {
-        "added-local": "Карточка добавлена локально (в API не найдена).",
+        "added-local": "Карточка добавлена локально.",
         "added": "Карточка добавлена.",
+        "search-fail": "Не удалось получить данные по выбранной карточке.",
     }
     return templates.TemplateResponse(
         request, "add.html", {
             "sources": list(SOURCES.keys()),
-            "default_source": request.cookies.get("source", "omdb"),
+            "default_source": request.cookies.get("source", "tmdb"),
             "message": messages.get(msg),
         })
 
 
-@app.post("/add")
-async def add(title: str = Form(...),
-              release_date: str | None = Form(None),
-              source: str = Form("omdb")):
-    src = SOURCES.get(source, SOURCES["omdb"])
-    results = []
+@app.post("/search")
+async def search(query: str = Form(...), source: str = Form("tmdb")):
+    src = SOURCES.get(source, SOURCES["tmdb"])
     try:
-        results = await src.search(title)
+        candidates = await src.search_candidates(query)
     except Exception as e:
-        print(f"[add] Search error: {e}")
+        print(f"[search] Error: {e}")
+        candidates = []
+    return JSONResponse({"candidates": candidates})
 
-    if results:
-        info = results[0]
-        rd = info["release_date"] or release_date or None
 
-        db("""INSERT OR REPLACE INTO titles
-              (external_id, title, type, release_date, poster_url, genres, source, updated_at)
-              VALUES (?,?,?,?,?,?,?,datetime('now'))""",
-           (info["external_id"], info["title"], info["type"], rd,
-            info["poster_url"], info["genres"], src.name), write=True)
+@app.post("/add")
+async def add_local(title: str = Form(...),
+                    release_date: str | None = Form(None)):
+    local_id = f"local:{uuid.uuid4().hex[:12]}"
+    db("""INSERT INTO titles
+          (external_id, title, type, release_date, poster_url, genres, source, updated_at)
+          VALUES (?,?,?,?,?,?,?,datetime('now'))""",
+       (local_id, title.strip(), None, release_date or None, None, "", "local"),
+       write=True)
+    await notify_new_card(title.strip(), release_date, "local", None)
+    return RedirectResponse("/new?msg=added-local", status_code=303)
 
-        if info["type"] == "series" and src.name == "tmdb":
-            try:
-                tmdb_id = int(info["external_id"].split(":")[1])
-                seasons = await src.fetch_seasons(tmdb_id)
-                save_seasons(info["external_id"], seasons)
-                for season in seasons:
-                    try:
-                        episodes = await src.fetch_episodes(tmdb_id, season["season_number"])
-                        save_episodes(info["external_id"], season["season_number"], episodes)
-                        await asyncio.sleep(0.5)
-                    except Exception:
-                        pass
-            except Exception as e:
-                print(f"[add] Error fetching seasons: {e}")
 
-        await notify_new_card(info["title"], rd, src.name, info["type"])
-        resp = RedirectResponse("/new?msg=added", status_code=303)
-        resp.set_cookie("source", src.name, max_age=60 * 60 * 24 * 365)
-        return resp
-    else:
-        local_id = f"local:{uuid.uuid4().hex[:12]}"
-        db("""INSERT INTO titles
-              (external_id, title, type, release_date, poster_url, genres, source, updated_at)
-              VALUES (?,?,?,?,?,?,?,datetime('now'))""",
-           (local_id, title.strip(), None, release_date or None, None, "", "local"),
-           write=True)
-        await notify_new_card(title.strip(), release_date, "local", None)
-        return RedirectResponse("/new?msg=added-local", status_code=303)
+@app.post("/add-select")
+async def add_select(external_id: str = Form(...),
+                     source: str = Form("tmdb"),
+                     release_date: str | None = Form(None)):
+    src = SOURCES.get(source)
+    if not src:
+        return RedirectResponse("/new?msg=search-fail", status_code=303)
+    try:
+        info = await src.fetch(external_id)
+    except Exception as e:
+        print(f"[add-select] Error: {e}")
+        info = None
+    if not info:
+        return RedirectResponse("/new?msg=search-fail", status_code=303)
+
+    rd = info["release_date"] or release_date or None
+    poster_local = await download_card_poster(info)
+
+    db("""INSERT OR REPLACE INTO titles
+          (external_id, title, type, release_date, poster_url, genres, source, updated_at)
+          VALUES (?,?,?,?,?,?,?,datetime('now'))""",
+       (info["external_id"], info["title"], info["type"], rd,
+        poster_local, info["genres"], src.name), write=True)
+
+    if info["type"] == "series" and src.name == "tmdb":
+        try:
+            tmdb_id = int(info["external_id"].split(":")[1])
+            seasons = await src.fetch_seasons(tmdb_id)
+            await save_seasons(info["external_id"], seasons)
+            for season in seasons:
+                try:
+                    episodes = await src.fetch_episodes(tmdb_id, season["season_number"])
+                    await save_episodes(info["external_id"], season["season_number"], episodes)
+                    await asyncio.sleep(0.3)
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"[add-select] Error fetching seasons: {e}")
+
+    await notify_new_card(info["title"], rd, src.name, info["type"])
+    resp = RedirectResponse("/new?msg=added", status_code=303)
+    resp.set_cookie("source", src.name, max_age=60 * 60 * 24 * 365)
+    return resp
 
 
 @app.post("/refresh")
@@ -1245,6 +1371,7 @@ async def settings_page(request: Request, msg: str | None = None):
     s = get_telegram_settings()
     log_rows = db("SELECT * FROM updates_log ORDER BY created_at DESC LIMIT 200")
     proxy_url = get_setting("proxy_url", "") or ""
+    theme = get_setting("theme", "dark")
     messages = {
         "refresh-saved": "Период обновления сохранён.",
         "telegram-saved": "Настройки Telegram сохранены.",
@@ -1252,6 +1379,7 @@ async def settings_page(request: Request, msg: str | None = None):
         "proxy-ok": "Прокси работает! Соединение установлено.",
         "proxy-fail": "Не удалось подключиться через прокси. Проверьте URL.",
         "proxy-not-set": "Прокси не настроен. Укажите URL прокси.",
+        "theme-saved": "Тема сохранена.",
         "test-ok": "Тестовое сообщение отправлено!",
         "test-fail": "Не удалось отправить. Проверьте токен и chat_id.",
     }
@@ -1262,6 +1390,7 @@ async def settings_page(request: Request, msg: str | None = None):
             "refresh_label": refresh_period_label(get_refresh_hours()),
             "log_rows": [dict(r) for r in log_rows],
             "proxy_url": proxy_url,
+            "theme": theme,
             "message": messages.get(msg),
         })
 
@@ -1273,6 +1402,14 @@ async def set_refresh_interval(hours: int = Form(...)):
     scheduler.reschedule_job("refresh", trigger="interval", hours=hours)
     print(f"[settings] Refresh interval changed to {hours}h")
     return RedirectResponse("/settings?msg=refresh-saved", status_code=303)
+
+
+@app.post("/settings/theme")
+async def save_theme(theme: str = Form("dark")):
+    if theme not in ("dark", "light"):
+        theme = "dark"
+    set_setting("theme", theme)
+    return RedirectResponse("/settings?msg=theme-saved", status_code=303)
 
 
 @app.post("/settings/proxy")
@@ -1329,34 +1466,28 @@ async def telegram_test(test_type: str):
 
     if test_type == "simple":
         ok = await send_telegram("🎬 <b>Тестовое сообщение</b>\nВсё работает!")
-
     elif test_type == "date-change":
         await notify_date_changes([{
             "title": "Тестовый фильм",
             "old_date": (today + timedelta(days=10)).isoformat(),
             "new_date": (today + timedelta(days=15)).isoformat(),
         }], force=True)
-
     elif test_type == "new-card":
         await notify_new_card("Тестовый фильм",
                               (today + timedelta(days=30)).isoformat(),
                               "tmdb", "movie", force=True)
-
     elif test_type == "new-season":
         await notify_new_season("Тестовый сериал", 2,
                                 (today + timedelta(days=20)).isoformat(),
                                 force=True)
-
     elif test_type == "new-episodes":
         await notify_new_episodes("Тестовый сериал", [
             {"season_number": 1, "episode_number": 5,
              "name": "Тестовый эпизод",
              "release_date": today.isoformat()},
         ], force=True)
-
     elif test_type == "daily":
         await check_and_notify(force=True)
-
     else:
         return RedirectResponse("/settings?msg=test-fail", status_code=303)
 
@@ -1442,7 +1573,7 @@ async def refresh_seasons(external_id: str):
         try:
             tmdb_id = int(external_id.split(":")[1])
             seasons = await src.fetch_seasons(tmdb_id)
-            new_seasons = save_seasons(external_id, seasons)
+            new_seasons = await save_seasons(external_id, seasons)
             await asyncio.sleep(0.5)
 
             for ns in new_seasons:
@@ -1453,7 +1584,7 @@ async def refresh_seasons(external_id: str):
             for season in seasons:
                 try:
                     episodes = await src.fetch_episodes(tmdb_id, season["season_number"])
-                    new_eps = save_episodes(external_id, season["season_number"], episodes)
+                    new_eps = await save_episodes(external_id, season["season_number"], episodes)
                     new_episodes_all.extend(new_eps)
                     await asyncio.sleep(0.5)
                 except Exception as e:

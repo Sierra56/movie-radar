@@ -3,48 +3,124 @@
 
 {% block extra_css %}
 <style>
-    .add-form {
-        max-width: 560px;
-        background: #1a1f2b;
-        padding: 24px;
-        border-radius: 12px;
-    }
-
-    .add-form .field {
+    .search-row {
         display: flex;
-        flex-direction: column;
-        margin-bottom: 16px;
+        gap: 8px;
+        max-width: 600px;
+        margin-bottom: 12px;
     }
 
-    .add-form label {
+    .search-row input[type=text] {
+        flex: 1;
+    }
+
+    .search-row select {
+        width: 140px;
+    }
+
+    .btn-search {
+        padding: 10px 16px;
+        font-size: 16px;
+    }
+
+    .search-status {
+        color: var(--text-muted);
+        margin: 12px 0;
+    }
+
+    .search-results {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 12px;
+        margin-top: 16px;
+    }
+
+    .search-item {
+        display: flex;
+        gap: 12px;
+        background: var(--bg-card);
+        border-radius: 12px;
+        padding: 10px;
+        cursor: pointer;
+        border: 1px solid var(--border);
+        transition: border-color .15s, background .15s;
+    }
+
+    .search-item:hover {
+        border-color: var(--accent);
+        background: var(--bg-hover);
+    }
+
+    .search-item img,
+    .search-item .no-poster {
+        width: 60px;
+        height: 90px;
+        object-fit: cover;
+        border-radius: 6px;
+        flex-shrink: 0;
+    }
+
+    .search-item .no-poster {
+        background: var(--no-poster-bg);
+        color: var(--no-poster-text);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+    }
+
+    .search-item-info {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .search-item-title {
         font-size: 14px;
-        color: #9aa3b8;
-        margin-bottom: 6px;
+        font-weight: 500;
+        margin-bottom: 4px;
     }
 
-    .add-form input,
-    .add-form select {
-        width: 100%;
+    .search-item-type {
+        font-size: 12px;
+        color: var(--text-muted);
     }
 
-    .add-form .hint {
+    .local-add {
+        background: var(--bg-card);
+        padding: 20px;
+        border-radius: 12px;
+        margin-top: 20px;
+        max-width: 600px;
+        display: none;
+    }
+
+    .local-add h3 {
+        font-size: 16px;
+        margin-bottom: 12px;
+    }
+
+    .local-add .field {
+        margin-bottom: 12px;
+    }
+
+    .local-add label {
+        display: block;
         font-size: 13px;
-        color: #6a7389;
-        margin-top: 4px;
+        color: var(--text-muted);
+        margin-bottom: 4px;
     }
 
-    .add-form button {
-        margin-top: 8px;
+    .local-add input {
         width: 100%;
     }
 
     .info-box {
-        background: #1a1f2b;
+        background: var(--bg-card);
         padding: 16px;
         border-radius: 12px;
         margin-top: 20px;
-        border-left: 3px solid #4f8cff;
-        max-width: 560px;
+        border-left: 3px solid var(--accent);
+        max-width: 600px;
     }
 
     .info-box h3 {
@@ -54,7 +130,7 @@
 
     .info-box p {
         font-size: 13px;
-        color: #9aa3b8;
+        color: var(--text-muted);
     }
 </style>
 {% endblock %}
@@ -64,36 +140,142 @@
 
 {% if message %}<p class="message">{{ message }}</p>{% endif %}
 
-<form class="add-form" method="post" action="/add">
-    <div class="field">
-        <label for="title">Название фильма или сериала</label>
-        <input id="title" name="title" placeholder="Например: Дюна: Часть третья" required autofocus>
-    </div>
+<div class="search-row">
+    <input type="text" id="search-title" placeholder="Название фильма или сериала" autofocus>
+    <select id="search-source">
+        {% for s in sources %}
+        <option value="{{ s }}" {% if s==default_source %}selected{% endif %}>
+            {% if s == 'omdb' %}OMDb{% else %}TMDB{% endif %}
+        </option>
+        {% endfor %}
+    </select>
+    <button class="btn-search" onclick="doSearch()" title="Поиск">🔍</button>
+</div>
 
-    <div class="field">
-        <label for="release_date">Дата релиза (если известна)</label>
-        <input type="date" id="release_date" name="release_date">
-        <p class="hint">Не обязательно. Если оставить пустым, подтянется из API.</p>
-    </div>
+<div id="search-results"></div>
 
-    <div class="field">
-        <label for="source">Источник данных</label>
-        <select id="source" name="source">
-            {% for s in sources %}
-            <option value="{{ s }}" {% if s==default_source %}selected{% endif %}>
-                {% if s == 'omdb' %}OMDb (IMDb){% else %}TMDB{% endif %}
-            </option>
-            {% endfor %}
-        </select>
-        <p class="hint">Для сериалов рекомендуется TMDB (поддерживает сезоны и эпизоды).</p>
-    </div>
-
-    <button type="submit">Добавить</button>
-</form>
+<div class="local-add" id="local-add">
+    <h3>Добавить локально (без поиска в API)</h3>
+    <form method="post" action="/add">
+        <div class="field">
+            <label>Название</label>
+            <input type="text" name="title" id="local-title" required>
+        </div>
+        <div class="field">
+            <label>Дата релиза (если известна)</label>
+            <input type="date" name="release_date">
+        </div>
+        <button type="submit">Добавить локально</button>
+    </form>
+</div>
 
 <div class="info-box">
-    <h3>💡 Если карточка не находится в API</h3>
-    <p>Система всё равно сохранит её с указанными данными как локальную.
-        Локальные карточки не обновляются автоматически, но попадают в календарь и уведомления.</p>
+    <h3>💡 Как это работает</h3>
+    <p>Введите название и нажмите 🔍. Появится список найденных карточек — кликните на нужную,
+        чтобы добавить её с постером, жанрами и датой. Если ничего не найдено, можно добавить
+        карточку локально.</p>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    async function doSearch() {
+        const q = document.getElementById('search-title').value.trim();
+        const source = document.getElementById('search-source').value;
+        const resultsDiv = document.getElementById('search-results');
+        const localAdd = document.getElementById('local-add');
+        if (!q) return;
+
+        resultsDiv.innerHTML = '<p class="search-status">Идёт поиск...</p>';
+        localAdd.style.display = 'none';
+
+        const formData = new FormData();
+        formData.append('query', q);
+        formData.append('source', source);
+
+        try {
+            const r = await fetch('/search', { method: 'POST', body: formData });
+            const data = await r.json();
+            renderResults(data.candidates, q);
+        } catch (e) {
+            resultsDiv.innerHTML = '<p class="search-status error">Ошибка поиска. Попробуйте ещё раз.</p>';
+            showLocalAdd(q);
+        }
+    }
+
+    function showLocalAdd(title) {
+        const localAdd = document.getElementById('local-add');
+        localAdd.style.display = 'block';
+        document.getElementById('local-title').value = title;
+    }
+
+    function renderResults(candidates, query) {
+        const resultsDiv = document.getElementById('search-results');
+        if (!candidates || !candidates.length) {
+            resultsDiv.innerHTML = '<p class="search-status">Ничего не найдено. Можно добавить локально.</p>';
+            showLocalAdd(query);
+            return;
+        }
+        resultsDiv.innerHTML = '';
+        const grid = document.createElement('div');
+        grid.className = 'search-results';
+        candidates.forEach(c => {
+            const item = document.createElement('div');
+            item.className = 'search-item';
+            item.onclick = () => selectCandidate(c.external_id, c.source);
+
+            const img = c.poster_url
+                ? `<img src="${c.poster_url}" alt="">`
+                : '<div class="no-poster">нет</div>';
+            const year = c.year ? ` (${c.year})` : '';
+            const icon = c.type === 'series' ? '📺' : '🎬';
+            const typeLabel = c.type === 'series' ? 'Сериал' : 'Фильм';
+
+            item.innerHTML = `
+      ${img}
+      <div class="search-item-info">
+        <div class="search-item-title">${icon} ${escapeHtml(c.title)}${year}</div>
+        <div class="search-item-type">${typeLabel}</div>
+      </div>
+    `;
+            grid.appendChild(item);
+        });
+        resultsDiv.appendChild(grid);
+    }
+
+    function selectCandidate(external_id, source) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/add-select';
+
+        const idInput = document.createElement('input');
+        idInput.type = 'hidden';
+        idInput.name = 'external_id';
+        idInput.value = external_id;
+        form.appendChild(idInput);
+
+        const srcInput = document.createElement('input');
+        srcInput.type = 'hidden';
+        srcInput.name = 'source';
+        srcInput.value = source;
+        form.appendChild(srcInput);
+
+        document.body.appendChild(form);
+        form.submit();
+    }
+
+    // Enter в поле поиска запускает поиск
+    document.getElementById('search-title').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            doSearch();
+        }
+    });
+</script>
 {% endblock %}

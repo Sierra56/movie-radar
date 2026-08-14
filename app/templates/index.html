@@ -15,15 +15,15 @@
         padding: 10px 18px;
         border-radius: 8px;
         text-decoration: none;
-        background: #2a3140;
-        color: #e9ecf3;
+        background: var(--bg-hover);
+        color: var(--text);
         font-size: 14px;
-        border: 1px solid #343d4f;
+        border: 1px solid var(--border-light);
         display: inline-block;
     }
 
     .actions a:hover {
-        background: #343d4f;
+        background: var(--border-light);
     }
 
     .toolbar {
@@ -37,16 +37,16 @@
         padding: 6px 14px;
         border-radius: 999px;
         text-decoration: none;
-        background: #1a1f2b;
-        color: #9aa3b8;
+        background: var(--bg-card);
+        color: var(--text-muted);
         font-size: 14px;
-        border: 1px solid #2a3140;
+        border: 1px solid var(--border);
     }
 
     .toolbar a.active {
-        background: #4f8cff;
+        background: var(--accent);
         color: #fff;
-        border-color: #4f8cff;
+        border-color: var(--accent);
     }
 
     .grid {
@@ -57,7 +57,7 @@
 
     .card {
         position: relative;
-        background: #1a1f2b;
+        background: var(--bg-card);
         border-radius: 12px;
         overflow: hidden;
     }
@@ -74,8 +74,8 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        background: #232a39;
-        color: #8b93a7;
+        background: var(--no-poster-bg);
+        color: var(--no-poster-text);
     }
 
     .info {
@@ -88,12 +88,12 @@
     }
 
     .meta {
-        color: #9aa3b8;
+        color: var(--text-muted);
         font-size: 13px;
     }
 
     .genre {
-        color: #8b93a7;
+        color: var(--text-faint);
         font-size: 12px;
         margin-top: 4px;
     }
@@ -102,7 +102,7 @@
         position: absolute;
         top: 6px;
         left: 6px;
-        background: rgba(0, 0, 0, .6);
+        background: var(--tag-bg);
         padding: 2px 6px;
         border-radius: 4px;
         font-size: 11px;
@@ -114,14 +114,14 @@
         margin-top: 6px;
         padding: 2px 8px;
         border-radius: 999px;
-        background: #274067;
-        color: #bcd4ff;
+        background: var(--accent-bg);
+        color: var(--accent-text);
         font-size: 12px;
     }
 
     .badge.out {
-        background: #3a2a2a;
-        color: #ffb4b4;
+        background: var(--warning-bg);
+        color: var(--warning-text);
     }
 
     .card-actions {
@@ -140,39 +140,40 @@
         font-size: 14px;
         border: 0;
         cursor: pointer;
+        color: #fff;
     }
 
     .card-actions .btn-refresh {
-        background: rgba(79, 140, 255, 0.75);
+        background: var(--refresh-btn-bg);
     }
 
     .card-actions .btn-refresh:hover {
-        background: rgba(79, 140, 255, 0.95);
+        background: var(--refresh-btn-hover);
     }
 
     .card-actions .btn-delete {
-        background: rgba(0, 0, 0, 0.55);
+        background: var(--delete-btn-bg);
     }
 
     .card-actions .btn-delete:hover {
-        background: rgba(255, 80, 80, 0.75);
+        background: var(--delete-btn-hover);
     }
 
     .empty {
-        color: #9aa3b8;
+        color: var(--text-muted);
         margin-top: 20px;
     }
 
     .updated-at {
         font-size: 11px;
-        color: #5a6378;
+        color: var(--text-faint);
         margin-top: 4px;
     }
 
     .seasons-link {
         display: block;
         font-size: 13px;
-        color: #4f8cff;
+        color: var(--accent);
         text-decoration: none;
         margin-top: 6px;
     }
@@ -183,7 +184,7 @@
 
     .watch-progress {
         font-size: 12px;
-        color: #7bd88f;
+        color: var(--success);
         margin-top: 4px;
     }
 
@@ -196,7 +197,7 @@
         align-items: center;
         gap: 6px;
         font-size: 12px;
-        color: #9aa3b8;
+        color: var(--text-muted);
         cursor: pointer;
     }
 
@@ -209,20 +210,20 @@
     #progress-wrap {
         display: none;
         margin-bottom: 16px;
-        background: #1a1f2b;
+        background: var(--bg-card);
         border-radius: 8px;
         padding: 12px;
     }
 
     #progress-wrap .bar-bg {
-        background: #2a3140;
+        background: var(--progress-bg);
         border-radius: 6px;
         height: 12px;
         overflow: hidden;
     }
 
     #progress-wrap .bar-fill {
-        background: #4f8cff;
+        background: var(--accent);
         height: 100%;
         width: 0;
         transition: width .5s;
@@ -230,12 +231,12 @@
 
     #progress-wrap .bar-text {
         font-size: 13px;
-        color: #9aa3b8;
+        color: var(--text-muted);
         margin-top: 6px;
     }
 
     .card.local {
-        border: 1px dashed #4f8cff40;
+        border: 1px dashed var(--accent);
     }
 </style>
 {% endblock %}
