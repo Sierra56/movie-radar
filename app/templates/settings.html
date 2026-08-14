@@ -121,14 +121,16 @@
     <h2>🎨 Тема оформления</h2>
     <form method="post" action="/settings/theme">
         <div class="field">
-            <label>Тема интерфейса</label>
-            <select name="theme">
-                <option value="dark" {% if theme=='dark' %}selected{% endif %}>Тёмная</option>
-                <option value="light" {% if theme=='light' %}selected{% endif %}>Светлая</option>
+            <label for="theme">Тема интерфейса</label>
+            <select name="theme" id="theme">
+                <option value="dark" {% if theme=='dark' %}selected{% endif %}>🌙 Тёмная</option>
+                <option value="light" {% if theme=='light' %}selected{% endif %}>☀️ Светлая</option>
             </select>
+            <p class="hint">Сейчас: {% if theme == 'light' %}светлая{% else %}тёмная{% endif %}. Применяется сразу после
+                сохранения.</p>
         </div>
         <div class="btn-row">
-            <button type="submit">Сохранить</button>
+            <button type="submit">Сохранить тему</button>
         </div>
     </form>
 </div>

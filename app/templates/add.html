@@ -6,21 +6,40 @@
     .search-row {
         display: flex;
         gap: 8px;
-        max-width: 600px;
+        max-width: 640px;
         margin-bottom: 12px;
     }
 
-    .search-row input[type=text] {
+    .search-input-wrap {
+        position: relative;
         flex: 1;
+    }
+
+    .search-input-wrap input {
+        width: 100%;
+        padding-right: 44px;
+    }
+
+    .search-icon {
+        position: absolute;
+        right: 6px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 6px;
+        font-size: 16px;
+        line-height: 1;
+        color: var(--text-muted);
+    }
+
+    .search-icon:hover {
+        color: var(--accent);
     }
 
     .search-row select {
         width: 140px;
-    }
-
-    .btn-search {
-        padding: 10px 16px;
-        font-size: 16px;
     }
 
     .search-status {
@@ -28,59 +47,119 @@
         margin: 12px 0;
     }
 
-    .search-results {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-        gap: 12px;
-        margin-top: 16px;
+    /* Modal */
+    .modal-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, .7);
+        z-index: 100;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
     }
 
-    .search-item {
+    .modal-overlay.open {
         display: flex;
-        gap: 12px;
+    }
+
+    .modal {
         background: var(--bg-card);
         border-radius: 12px;
+        max-width: 640px;
+        width: 100%;
+        max-height: 85vh;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 8px 40px rgba(0, 0, 0, .5);
+    }
+
+    .modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .modal-header h3 {
+        font-size: 17px;
+    }
+
+    .modal-close {
+        background: none;
+        border: none;
+        font-size: 22px;
+        color: var(--text-muted);
+        cursor: pointer;
+        padding: 4px 8px;
+        line-height: 1;
+    }
+
+    .modal-close:hover {
+        color: var(--error);
+    }
+
+    .modal-body {
+        padding: 16px 20px;
+        overflow-y: auto;
+    }
+
+    .modal-loading {
+        text-align: center;
+        color: var(--text-muted);
+        padding: 24px;
+    }
+
+    .result-item {
+        display: flex;
+        gap: 12px;
         padding: 10px;
+        border-radius: 10px;
         cursor: pointer;
         border: 1px solid var(--border);
+        margin-bottom: 8px;
         transition: border-color .15s, background .15s;
     }
 
-    .search-item:hover {
+    .result-item:hover {
         border-color: var(--accent);
         background: var(--bg-hover);
     }
 
-    .search-item img,
-    .search-item .no-poster {
-        width: 60px;
-        height: 90px;
+    .result-item img,
+    .result-item .no-poster {
+        width: 56px;
+        height: 84px;
         object-fit: cover;
         border-radius: 6px;
         flex-shrink: 0;
     }
 
-    .search-item .no-poster {
+    .result-item .no-poster {
         background: var(--no-poster-bg);
         color: var(--no-poster-text);
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 11px;
+        font-size: 10px;
     }
 
-    .search-item-info {
+    .result-info {
         flex: 1;
         min-width: 0;
     }
 
-    .search-item-title {
+    .result-title {
         font-size: 14px;
         font-weight: 500;
         margin-bottom: 4px;
     }
 
-    .search-item-type {
+    .result-meta {
         font-size: 12px;
         color: var(--text-muted);
     }
@@ -90,7 +169,7 @@
         padding: 20px;
         border-radius: 12px;
         margin-top: 20px;
-        max-width: 600px;
+        max-width: 640px;
         display: none;
     }
 
@@ -120,7 +199,7 @@
         border-radius: 12px;
         margin-top: 20px;
         border-left: 3px solid var(--accent);
-        max-width: 600px;
+        max-width: 640px;
     }
 
     .info-box h3 {
@@ -141,7 +220,10 @@
 {% if message %}<p class="message">{{ message }}</p>{% endif %}
 
 <div class="search-row">
-    <input type="text" id="search-title" placeholder="Название фильма или сериала" autofocus>
+    <div class="search-input-wrap">
+        <input type="text" id="search-title" placeholder="Название фильма или сериала" autofocus>
+        <button class="search-icon" onclick="doSearch()" title="Поиск в OMDB/TMDB">🔍</button>
+    </div>
     <select id="search-source">
         {% for s in sources %}
         <option value="{{ s }}" {% if s==default_source %}selected{% endif %}>
@@ -149,10 +231,7 @@
         </option>
         {% endfor %}
     </select>
-    <button class="btn-search" onclick="doSearch()" title="Поиск">🔍</button>
 </div>
-
-<div id="search-results"></div>
 
 <div class="local-add" id="local-add">
     <h3>Добавить локально (без поиска в API)</h3>
@@ -171,9 +250,22 @@
 
 <div class="info-box">
     <h3>💡 Как это работает</h3>
-    <p>Введите название и нажмите 🔍. Появится список найденных карточек — кликните на нужную,
-        чтобы добавить её с постером, жанрами и датой. Если ничего не найдено, можно добавить
-        карточку локально.</p>
+    <p>Введите название и нажмите 🔍 (или Enter). Откроется окно с найденными результатами —
+        кликните на нужный, и карточка добавится с постером, жанрами и датой. Если ничего не
+        найдено, можно добавить карточку локально.</p>
+</div>
+
+<!-- Модальное окно результатов поиска -->
+<div class="modal-overlay" id="search-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>Выберите результат</h3>
+            <button class="modal-close" onclick="closeModal()" title="Закрыть">×</button>
+        </div>
+        <div class="modal-body" id="modal-results">
+            <p class="modal-loading">Идёт поиск...</p>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
@@ -185,15 +277,34 @@
         return div.innerHTML;
     }
 
+    function openModal() {
+        document.getElementById('search-modal').classList.add('open');
+    }
+
+    function closeModal() {
+        document.getElementById('search-modal').classList.remove('open');
+    }
+
+    // Закрытие модалки по клику на фон
+    document.getElementById('search-modal').addEventListener('click', function (e) {
+        if (e.target === this) closeModal();
+    });
+
+    // Закрытие по Escape
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') closeModal();
+    });
+
     async function doSearch() {
         const q = document.getElementById('search-title').value.trim();
         const source = document.getElementById('search-source').value;
-        const resultsDiv = document.getElementById('search-results');
+        const resultsDiv = document.getElementById('modal-results');
         const localAdd = document.getElementById('local-add');
         if (!q) return;
 
-        resultsDiv.innerHTML = '<p class="search-status">Идёт поиск...</p>';
         localAdd.style.display = 'none';
+        resultsDiv.innerHTML = '<p class="modal-loading">Идёт поиск...</p>';
+        openModal();
 
         const formData = new FormData();
         formData.append('query', q);
@@ -204,7 +315,8 @@
             const data = await r.json();
             renderResults(data.candidates, q);
         } catch (e) {
-            resultsDiv.innerHTML = '<p class="search-status error">Ошибка поиска. Попробуйте ещё раз.</p>';
+            resultsDiv.innerHTML = '<p class="modal-loading">Ошибка поиска. Попробуйте ещё раз.</p>';
+            closeModal();
             showLocalAdd(q);
         }
     }
@@ -216,37 +328,37 @@
     }
 
     function renderResults(candidates, query) {
-        const resultsDiv = document.getElementById('search-results');
+        const resultsDiv = document.getElementById('modal-results');
         if (!candidates || !candidates.length) {
-            resultsDiv.innerHTML = '<p class="search-status">Ничего не найдено. Можно добавить локально.</p>';
-            showLocalAdd(query);
+            resultsDiv.innerHTML = '<p class="modal-loading">Ничего не найдено.</p>';
+            setTimeout(() => {
+                closeModal();
+                showLocalAdd(query);
+            }, 1200);
             return;
         }
         resultsDiv.innerHTML = '';
-        const grid = document.createElement('div');
-        grid.className = 'search-results';
         candidates.forEach(c => {
             const item = document.createElement('div');
-            item.className = 'search-item';
+            item.className = 'result-item';
             item.onclick = () => selectCandidate(c.external_id, c.source);
 
             const img = c.poster_url
                 ? `<img src="${c.poster_url}" alt="">`
                 : '<div class="no-poster">нет</div>';
-            const year = c.year ? ` (${c.year})` : '';
+            const year = c.year ? ` · ${c.year}` : '';
             const icon = c.type === 'series' ? '📺' : '🎬';
             const typeLabel = c.type === 'series' ? 'Сериал' : 'Фильм';
 
             item.innerHTML = `
       ${img}
-      <div class="search-item-info">
-        <div class="search-item-title">${icon} ${escapeHtml(c.title)}${year}</div>
-        <div class="search-item-type">${typeLabel}</div>
+      <div class="result-info">
+        <div class="result-title">${icon} ${escapeHtml(c.title)}</div>
+        <div class="result-meta">${typeLabel}${year}</div>
       </div>
     `;
-            grid.appendChild(item);
+            resultsDiv.appendChild(item);
         });
-        resultsDiv.appendChild(grid);
     }
 
     function selectCandidate(external_id, source) {
@@ -270,7 +382,7 @@
         form.submit();
     }
 
-    // Enter в поле поиска запускает поиск
+    // Enter в поле запускает поиск
     document.getElementById('search-title').addEventListener('keydown', function (e) {
         if (e.key === 'Enter') {
             e.preventDefault();
