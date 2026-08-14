@@ -25,7 +25,6 @@ REFRESH_HOURS_DEFAULT = int(os.getenv("REFRESH_HOURS", "12"))
 app = FastAPI()
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
-# Posters storage (mounted via ./data:/data)
 POSTERS_DIR = os.path.join(os.path.dirname(DB_PATH), "posters")
 os.makedirs(POSTERS_DIR, exist_ok=True)
 app.mount("/posters", StaticFiles(directory=POSTERS_DIR), name="posters")
@@ -41,8 +40,35 @@ def sanitize_id(external_id: str) -> str:
     return external_id.replace(":", "_").replace("/", "_")
 
 
+def parse_tmdb_id(external_id: str) -> int | None:
+    """Extract numeric TMDB id. Supports 'tmdb:123' and 'tmdb:movie:123'/'tmdb:tv:123'."""
+    if not external_id or not external_id.startswith("tmdb:"):
+        return None
+    parts = external_id.split(":")
+    if len(parts) == 3 and parts[1] in ("movie", "tv"):
+        try:
+            return int(parts[2])
+        except ValueError:
+            return None
+    if len(parts) == 2:
+        try:
+            return int(parts[1])
+        except ValueError:
+            return None
+    return None
+
+
+def parse_tmdb_type(external_id: str) -> str | None:
+    """Returns 'movie' or 'tv' if encoded in external_id, else None."""
+    if not external_id or not external_id.startswith("tmdb:"):
+        return None
+    parts = external_id.split(":")
+    if len(parts) == 3 and parts[1] in ("movie", "tv"):
+        return parts[1]
+    return None
+
+
 async def download_image(url: str, filename: str) -> str | None:
-    """Download image through proxy and save locally. Returns local path or None."""
     if not url:
         return None
     os.makedirs(POSTERS_DIR, exist_ok=True)
@@ -75,8 +101,6 @@ async def download_card_poster(info: dict) -> str | None:
 
 
 def ensure_proxied(url: str | None) -> str | None:
-    """Wrap external URLs in /img-proxy so they load through our proxy.
-    Local paths (/posters/...) and already-proxied URLs pass through."""
     if not url:
         return None
     if url.startswith("/posters/") or url.startswith("/img-proxy"):
@@ -212,7 +236,7 @@ class TmdbSource(Source):
         genres = ", ".join(g["name"] for g in d.get("genres", []))
         poster = f"{self._POSTER}{d['poster_path']}" if d.get("poster_path") else None
         return {
-            "external_id": f"tmdb:{tmdb_id}",
+            "external_id": f"tmdb:{media_type}:{tmdb_id}",
             "title": title,
             "type": type_,
             "release_date": self._parse_date(release),
@@ -234,16 +258,21 @@ class TmdbSource(Source):
         if not valid:
             return []
         best = max(valid, key=score)
-        return [await self._details("movie" if best["media_type"] == "movie" else "tv",
-                                    best["id"])]
+        mt = "movie" if best["media_type"] == "movie" else "tv"
+        return [await self._details(mt, best["id"])]
 
     async def fetch(self, external_id: str) -> dict | None:
-        if not external_id.startswith("tmdb:"):
+        tmdb_id = parse_tmdb_id(external_id)
+        if tmdb_id is None:
             return None
-        try:
-            tmdb_id = int(external_id.split(":", 1)[1])
-        except (ValueError, IndexError):
-            return None
+        tmdb_type = parse_tmdb_type(external_id)
+        # Type is known — fetch the exact endpoint
+        if tmdb_type:
+            try:
+                return await self._details(tmdb_type, tmdb_id)
+            except httpx.HTTPStatusError:
+                return None
+        # Legacy format without type — fall back to guessing
         try:
             return await self._details("movie", tmdb_id)
         except httpx.HTTPStatusError:
@@ -266,7 +295,7 @@ class TmdbSource(Source):
             year = rel[:4] if rel else ""
             poster = f"{self._POSTER_SMALL}{r['poster_path']}" if r.get("poster_path") else None
             candidates.append({
-                "external_id": f"tmdb:{r['id']}",
+                "external_id": f"tmdb:{mt}:{r['id']}",
                 "title": title,
                 "year": year,
                 "type": "movie" if mt == "movie" else "series",
@@ -458,7 +487,6 @@ def save_telegram_settings(bot_token: str, chat_id: str, enabled: bool,
        write=True)
 
 
-# Expose theme to all templates
 templates.env.globals["get_theme"] = get_theme
 
 
@@ -1024,32 +1052,33 @@ async def refresh_catalog():
                 updated += 1
 
         if row["type"] == "series" and src.name == "tmdb":
-            try:
-                tmdb_id = int(row["external_id"].split(":")[1])
-                seasons = await src.fetch_seasons(tmdb_id)
-                new_seasons = await save_seasons(row["external_id"], seasons)
-                await asyncio.sleep(0.5)
+            tmdb_id = parse_tmdb_id(row["external_id"])
+            if tmdb_id is not None:
+                try:
+                    seasons = await src.fetch_seasons(tmdb_id)
+                    new_seasons = await save_seasons(row["external_id"], seasons)
+                    await asyncio.sleep(0.5)
 
-                for ns in new_seasons:
-                    await notify_new_season(new_title, ns["season_number"],
-                                            ns["release_date"])
+                    for ns in new_seasons:
+                        await notify_new_season(new_title, ns["season_number"],
+                                                ns["release_date"])
 
-                new_episodes_all = []
-                for season in seasons:
-                    try:
-                        episodes = await src.fetch_episodes(tmdb_id,
-                                                            season["season_number"])
-                        new_eps = await save_episodes(row["external_id"],
-                                                      season["season_number"], episodes)
-                        new_episodes_all.extend(new_eps)
-                        await asyncio.sleep(0.5)
-                    except Exception as e:
-                        print(f"[refresh] Error fetching episodes S{season['season_number']}: {e}")
+                    new_episodes_all = []
+                    for season in seasons:
+                        try:
+                            episodes = await src.fetch_episodes(tmdb_id,
+                                                                season["season_number"])
+                            new_eps = await save_episodes(row["external_id"],
+                                                          season["season_number"], episodes)
+                            new_episodes_all.extend(new_eps)
+                            await asyncio.sleep(0.5)
+                        except Exception as e:
+                            print(f"[refresh] Error fetching episodes S{season['season_number']}: {e}")
 
-                if new_episodes_all:
-                    await notify_new_episodes(new_title, new_episodes_all)
-            except Exception as e:
-                print(f"[refresh] Error fetching seasons for {row['external_id']}: {e}")
+                    if new_episodes_all:
+                        await notify_new_episodes(new_title, new_episodes_all)
+                except Exception as e:
+                    print(f"[refresh] Error fetching seasons for {row['external_id']}: {e}")
 
         refresh_progress["done"] = i + 1
 
@@ -1118,28 +1147,29 @@ async def refresh_single(external_id: str) -> bool:
            (new_title, new_rd, poster_local, new_genres, external_id), write=True)
 
     if row["type"] == "series" and src.name == "tmdb":
-        try:
-            tmdb_id = int(external_id.split(":")[1])
-            seasons = await src.fetch_seasons(tmdb_id)
-            new_seasons = await save_seasons(external_id, seasons)
-            for ns in new_seasons:
-                await notify_new_season(new_title, ns["season_number"],
-                                        ns["release_date"])
+        tmdb_id = parse_tmdb_id(external_id)
+        if tmdb_id is not None:
+            try:
+                seasons = await src.fetch_seasons(tmdb_id)
+                new_seasons = await save_seasons(external_id, seasons)
+                for ns in new_seasons:
+                    await notify_new_season(new_title, ns["season_number"],
+                                            ns["release_date"])
 
-            new_episodes_all = []
-            for season in seasons:
-                try:
-                    episodes = await src.fetch_episodes(tmdb_id, season["season_number"])
-                    new_eps = await save_episodes(external_id, season["season_number"], episodes)
-                    new_episodes_all.extend(new_eps)
-                    await asyncio.sleep(0.3)
-                except Exception:
-                    pass
+                new_episodes_all = []
+                for season in seasons:
+                    try:
+                        episodes = await src.fetch_episodes(tmdb_id, season["season_number"])
+                        new_eps = await save_episodes(external_id, season["season_number"], episodes)
+                        new_episodes_all.extend(new_eps)
+                        await asyncio.sleep(0.3)
+                    except Exception:
+                        pass
 
-            if new_episodes_all:
-                await notify_new_episodes(new_title, new_episodes_all)
-        except Exception as e:
-            print(f"[refresh-single] Error refreshing seasons: {e}")
+                if new_episodes_all:
+                    await notify_new_episodes(new_title, new_episodes_all)
+            except Exception as e:
+                print(f"[refresh-single] Error refreshing seasons: {e}")
 
     if date_change:
         await notify_date_changes([date_change])
@@ -1392,19 +1422,20 @@ async def add_select(external_id: str = Form(...),
         poster_local, info["genres"], src.name), write=True)
 
     if info["type"] == "series" and src.name == "tmdb":
-        try:
-            tmdb_id = int(info["external_id"].split(":")[1])
-            seasons = await src.fetch_seasons(tmdb_id)
-            await save_seasons(info["external_id"], seasons)
-            for season in seasons:
-                try:
-                    episodes = await src.fetch_episodes(tmdb_id, season["season_number"])
-                    await save_episodes(info["external_id"], season["season_number"], episodes)
-                    await asyncio.sleep(0.3)
-                except Exception:
-                    pass
-        except Exception as e:
-            print(f"[add-select] Error fetching seasons: {e}")
+        tmdb_id = parse_tmdb_id(info["external_id"])
+        if tmdb_id is not None:
+            try:
+                seasons = await src.fetch_seasons(tmdb_id)
+                await save_seasons(info["external_id"], seasons)
+                for season in seasons:
+                    try:
+                        episodes = await src.fetch_episodes(tmdb_id, season["season_number"])
+                        await save_episodes(info["external_id"], season["season_number"], episodes)
+                        await asyncio.sleep(0.3)
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[add-select] Error fetching seasons: {e}")
 
     await notify_new_card(info["title"], rd, src.name, info["type"])
     resp = RedirectResponse("/new?msg=added", status_code=303)
@@ -1637,32 +1668,33 @@ async def refresh_seasons(external_id: str):
     card = dict(rows[0])
     src = SOURCES.get(card["source"])
     if src and src.name == "tmdb" and card["type"] == "series":
-        try:
-            tmdb_id = int(external_id.split(":")[1])
-            seasons = await src.fetch_seasons(tmdb_id)
-            new_seasons = await save_seasons(external_id, seasons)
-            await asyncio.sleep(0.5)
+        tmdb_id = parse_tmdb_id(external_id)
+        if tmdb_id is not None:
+            try:
+                seasons = await src.fetch_seasons(tmdb_id)
+                new_seasons = await save_seasons(external_id, seasons)
+                await asyncio.sleep(0.5)
 
-            for ns in new_seasons:
-                await notify_new_season(card["title"], ns["season_number"],
-                                        ns["release_date"])
+                for ns in new_seasons:
+                    await notify_new_season(card["title"], ns["season_number"],
+                                            ns["release_date"])
 
-            new_episodes_all = []
-            for season in seasons:
-                try:
-                    episodes = await src.fetch_episodes(tmdb_id, season["season_number"])
-                    new_eps = await save_episodes(external_id, season["season_number"], episodes)
-                    new_episodes_all.extend(new_eps)
-                    await asyncio.sleep(0.5)
-                except Exception as e:
-                    print(f"[seasons] Error fetching episodes: {e}")
+                new_episodes_all = []
+                for season in seasons:
+                    try:
+                        episodes = await src.fetch_episodes(tmdb_id, season["season_number"])
+                        new_eps = await save_episodes(external_id, season["season_number"], episodes)
+                        new_episodes_all.extend(new_eps)
+                        await asyncio.sleep(0.5)
+                    except Exception as e:
+                        print(f"[seasons] Error fetching episodes: {e}")
 
-            if new_episodes_all:
-                await notify_new_episodes(card["title"], new_episodes_all)
+                if new_episodes_all:
+                    await notify_new_episodes(card["title"], new_episodes_all)
 
-            print(f"[seasons] Refreshed {len(seasons)} seasons for {card['title']}")
-        except Exception as e:
-            print(f"[seasons] Error: {e}")
+                print(f"[seasons] Refreshed {len(seasons)} seasons for {card['title']}")
+            except Exception as e:
+                print(f"[seasons] Error: {e}")
     return RedirectResponse(f"/title/{external_id}", status_code=303)
 
 
