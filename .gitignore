@@ -1,5 +1,18 @@
+# Секреты
 .env
+
+# Данные приложения (БД + картинки)
+data/
+
+# Python
 __pycache__/
 *.pyc
-*.db
+*.pyo
+
+# OS
 .DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

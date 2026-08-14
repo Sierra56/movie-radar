@@ -5,8 +5,8 @@ services:
       - "8000:8000"
     env_file: .env
     volumes:
-      - db:/data
+      # Bind-mount: БД и картинки видны прямо на диске хоста в папке ./data
+      # ./data/catalog.db   — база данных
+      # ./data/posters/     — постеры, превью, кадры эпизодов, кэш /img-proxy
+      - ./data:/data
     restart: unless-stopped
-
-volumes:
-  db:

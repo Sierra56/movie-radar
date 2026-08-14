@@ -2,10 +2,12 @@ import os
 import sqlite3
 import asyncio
 import uuid
+import hashlib
 from abc import ABC, abstractmethod
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import quote, urlparse
 
 import httpx
 from fastapi import FastAPI, Form, Request, Response, BackgroundTasks
@@ -23,7 +25,7 @@ REFRESH_HOURS_DEFAULT = int(os.getenv("REFRESH_HOURS", "12"))
 app = FastAPI()
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
-# Posters storage
+# Posters storage (mounted via ./data:/data)
 POSTERS_DIR = os.path.join(os.path.dirname(DB_PATH), "posters")
 os.makedirs(POSTERS_DIR, exist_ok=True)
 app.mount("/posters", StaticFiles(directory=POSTERS_DIR), name="posters")
@@ -40,7 +42,7 @@ def sanitize_id(external_id: str) -> str:
 
 
 async def download_image(url: str, filename: str) -> str | None:
-    """Download image and save locally. Returns local path or None."""
+    """Download image through proxy and save locally. Returns local path or None."""
     if not url:
         return None
     os.makedirs(POSTERS_DIR, exist_ok=True)
@@ -70,6 +72,16 @@ async def download_card_poster(info: dict) -> str | None:
     filename = f"{sanitize_id(info['external_id'])}.jpg"
     local = await download_image(url, filename)
     return local or url
+
+
+def ensure_proxied(url: str | None) -> str | None:
+    """Wrap external URLs in /img-proxy so they load through our proxy.
+    Local paths (/posters/...) and already-proxied URLs pass through."""
+    if not url:
+        return None
+    if url.startswith("/posters/") or url.startswith("/img-proxy"):
+        return url
+    return f"/img-proxy?url={quote(url, safe='')}"
 
 
 # ── Source abstraction ────────────────────────────────
@@ -994,7 +1006,6 @@ async def refresh_catalog():
                        row["genres"], new_genres)
             changed = True
 
-        # Poster: download locally if available
         poster_local = row["poster_url"]
         if fresh.get("poster_url"):
             filename = f"{sanitize_id(row['external_id'])}.jpg"
@@ -1201,6 +1212,54 @@ def build_ics(cards: list[dict]) -> str:
     return "\r\n".join(lines)
 
 
+# ── Image proxy route ─────────────────────────────────
+_ALLOWED_IMG_HOSTS = {
+    "image.tmdb.org",
+    "m.media-amazon.com",
+    "ia.media-imdb.com",
+    "upload.wikimedia.org",
+}
+
+
+@app.get("/img-proxy")
+async def img_proxy(url: str):
+    parsed = urlparse(url)
+    if parsed.hostname not in _ALLOWED_IMG_HOSTS:
+        return Response(status_code=403)
+
+    url_hash = hashlib.md5(url.encode()).hexdigest()
+    cache_path = os.path.join(POSTERS_DIR, f"cache_{url_hash}.img")
+    meta_path = os.path.join(POSTERS_DIR, f"cache_{url_hash}.mime")
+
+    if os.path.exists(cache_path):
+        media_type = "image/jpeg"
+        if os.path.exists(meta_path):
+            with open(meta_path, "r") as f:
+                media_type = f.read().strip() or "image/jpeg"
+        with open(cache_path, "rb") as f:
+            content = f.read()
+        return Response(content=content, media_type=media_type)
+
+    try:
+        proxy = get_proxy_url()
+        client_kwargs = {"timeout": 15, "follow_redirects": True}
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        async with httpx.AsyncClient(**client_kwargs) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            content = r.content
+            media_type = r.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+            with open(cache_path, "wb") as f:
+                f.write(content)
+            with open(meta_path, "w") as f:
+                f.write(media_type)
+            return Response(content=content, media_type=media_type)
+    except Exception as e:
+        print(f"[img-proxy] Error fetching {url}: {e}")
+        return Response(status_code=502)
+
+
 # ── Routes ────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request, sort: str = "date",
@@ -1250,6 +1309,7 @@ async def index(request: Request, sort: str = "date",
         else:
             c["display_poster"] = c["poster_url"]
 
+        c["display_poster"] = ensure_proxied(c.get("display_poster"))
         cards.append(c)
 
     messages = {
@@ -1288,6 +1348,9 @@ async def search(query: str = Form(...), source: str = Form("tmdb")):
     except Exception as e:
         print(f"[search] Error: {e}")
         candidates = []
+    for c in candidates:
+        if c.get("poster_url"):
+            c["poster_url"] = ensure_proxied(c["poster_url"])
     return JSONResponse({"candidates": candidates})
 
 
@@ -1551,6 +1614,10 @@ async def title_page(request: Request, external_id: str):
         sd["percent"] = progress_percent(w, t)
         season_list.append(sd)
 
+    card["poster_url"] = ensure_proxied(card.get("poster_url"))
+    for sd in season_list:
+        sd["poster_url"] = ensure_proxied(sd.get("poster_url"))
+
     show_watched, show_total = get_show_progress(external_id)
 
     return templates.TemplateResponse(request, "title.html", {
@@ -1622,6 +1689,7 @@ async def season_page(request: Request, external_id: str, season_number: int):
         ed = dict(e)
         ed["date_human"] = human_date(ed["release_date"])
         ed["watched"] = ed["episode_number"] in watched_set
+        ed["poster_url"] = ensure_proxied(ed.get("poster_url"))
         episodes.append(ed)
 
     watched_count, total_count = get_season_progress(external_id, season_number)
