@@ -52,7 +52,7 @@ TORRENT_TABLES = ["tracker_credentials", "transmission_settings",
 ENCRYPTION_KEY_PATH = os.path.join(os.path.dirname(DB_PATH), "encryption.key")
 
 
-# ── Encryption ───────────────────────────────────────
+# ── Encryption ────────────────────────────────────────
 def get_encryption_key() -> bytes:
     if os.path.exists(ENCRYPTION_KEY_PATH):
         with open(ENCRYPTION_KEY_PATH, "rb") as f:
@@ -631,7 +631,7 @@ def log_update(external_id: str, title: str, field: str,
        (external_id, title, field, old_value, new_value), write=True)
 
 
-# ── Helpers ──────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────
 def human_date(iso: str | None) -> str | None:
     if not iso:
         return None
@@ -901,7 +901,7 @@ async def notify_date_changes(changes: list, force: bool = False):
                 if delta > 0:
                     direction = f"⬇️ на {delta} {plural(delta, ('день', 'дня', 'дней'))} позже"
                 elif delta < 0:
-                    direction = f"⬆️ на {abs(delta)} {plural(abs.delta, ('день', 'дня', 'дней'))} раньше"
+                    direction = f"⬆️ на {abs(delta)} {plural(abs(delta), ('день', 'дня', 'дней'))} раньше"
             except ValueError:
                 pass
         elif not c["old_date"] and c["new_date"]:
@@ -1637,9 +1637,13 @@ async def check_distribution_now(title_external_id: str) -> tuple:
     if not creds or not creds.get("username"):
         return False, "Не настроены учётные данные трекера"
 
+    password = decrypt_value(creds["encrypted_password"])
+    if not password:
+        return False, "Не удалось расшифровать пароль трекера"
+
     client = RuTrackerClient(
         creds["username"],
-        decrypt_value(creds["encrypted_password"]),
+        password,
         get_proxy_url())
 
     try:
@@ -1702,7 +1706,6 @@ async def check_distribution_now(title_external_id: str) -> tuple:
 async def check_distribution(title_external_id: str, sort: str = "date"):
     ok, message = await check_distribution_now(title_external_id)
     msg_param = "dist-checked" if ok else "dist-check-fail"
-    # Store last check message in settings for display
     set_setting("last_dist_check", message)
     return RedirectResponse(f"/?sort={sort}&msg={msg_param}", status_code=303)
 
@@ -1711,26 +1714,42 @@ async def check_distribution(title_external_id: str, sort: str = "date"):
 async def test_tracker_login():
     creds = get_tracker_credentials("rutracker")
     if not creds or not creds.get("username"):
+        print("[tracker-test] No credentials configured")
+        return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
+    password = decrypt_value(creds["encrypted_password"])
+    if not password:
+        print("[tracker-test] Password decryption returned empty")
         return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
     client = RuTrackerClient(
         creds["username"],
-        decrypt_value(creds["encrypted_password"]),
+        password,
         get_proxy_url())
     try:
-        await client.login()
-        db("""UPDATE tracker_credentials SET last_login_at=datetime('now'),
-              last_error=NULL, error_count=0 WHERE tracker_name='rutracker'""",
-           write=True)
+        cookies = await client.login()
+        db("""UPDATE tracker_credentials SET encrypted_cookies=?,
+              last_login_at=datetime('now'), last_error=NULL, error_count=0
+              WHERE tracker_name='rutracker'""",
+           (encrypt_value(json.dumps(cookies)),), write=True)
         return RedirectResponse("/settings?msg=tracker-test-ok", status_code=303)
     except RuTrackerCaptchaError:
+        db("UPDATE tracker_credentials SET last_error='captcha' WHERE tracker_name='rutracker'",
+           write=True)
         return RedirectResponse("/settings?msg=tracker-captcha", status_code=303)
     except RuTrackerError as e:
-        db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name='rutracker'",
+        print(f"[tracker-test] Login failed: {e}")
+        db("UPDATE tracker_credentials SET last_error=?, error_count=error_count+1 WHERE tracker_name='rutracker'",
            (str(e),), write=True)
+        return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
+    except Exception as e:
+        print(f"[tracker-test] Unexpected error: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name='rutracker'",
+           (f"{type(e).__name__}: {e}",), write=True)
         return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
 
 
-# ── Routes ───────────────────────────────────────────
+# ── Routes ────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request, sort: str = "date",
                 err: str | None = None, msg: str | None = None):

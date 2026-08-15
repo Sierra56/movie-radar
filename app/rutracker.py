@@ -102,7 +102,7 @@ class RuTrackerClient:
     def _client(self, cookies: dict | None = None) -> httpx.AsyncClient:
         kwargs = {"timeout": 25, "follow_redirects": True}
         if self.proxy:
-            kwargs["proxy"] = proxy
+            kwargs["proxy"] = self.proxy
         client = httpx.AsyncClient(**kwargs)
         if cookies:
             client.cookies = dict(cookies)
@@ -110,11 +110,17 @@ class RuTrackerClient:
 
     async def login(self) -> dict:
         """Login and return cookies dict. Raises on captcha / auth / network failure."""
+        print(f"[rutracker] Login attempt: user={self.username}, proxy={self.proxy or 'none'}")
         try:
             async with self._client() as client:
-                # Предварительный GET главной — получаем базовые cookies
-                await client.get(INDEX_URL, headers=_BROWSER_HEADERS)
+                print("[rutracker] Step 1: GET index.php to prime cookies")
+                try:
+                    r_idx = await client.get(INDEX_URL, headers=_BROWSER_HEADERS)
+                    print(f"[rutracker]   index status={r_idx.status_code}")
+                except Exception as e:
+                    print(f"[rutracker]   index failed: {e}")
 
+                print("[rutracker] Step 2: POST login")
                 r = await client.post(
                     LOGIN_URL,
                     data={
@@ -129,7 +135,7 @@ class RuTrackerClient:
                         "Content-Type": "application/x-www-form-urlencoded",
                     },
                 )
-                print(f"[rutracker] Login status={r.status_code} final_url={r.url}")
+                print(f"[rutracker]   login status={r.status_code} url={r.url}")
 
                 low = r.text.lower()
                 if "капча" in low or "captcha" in low:
@@ -137,16 +143,21 @@ class RuTrackerClient:
                     raise RuTrackerCaptchaError("Rutracker требует капчу")
 
                 session = client.cookies.get("bb_session")
-                if not session:
-                    save_debug_dump(r.text)
-                    raise RuTrackerAuthError(
-                        "Не удалось войти: нет cookie bb_session "
-                        "(проверьте логин/пароль, дамп сохранён)")
+                print(f"[rutracker]   cookies after login: {list(client.cookies.keys())}")
+                print(f"[rutracker]   bb_session: {bool(session)}")
 
-                print(f"[rutracker] Login OK, cookies: {list(client.cookies.keys())}")
+                if not session:
+                    soup = BeautifulSoup(r.text, "html.parser")
+                    error_div = soup.find(class_="warnColor1") or soup.find(class_="error")
+                    err_text = error_div.get_text(strip=True) if error_div else ""
+                    save_debug_dump(r.text)
+                    msg = f"Нет cookie bb_session. {err_text or '(страница сохранена в debug_last_topic.html)'}"
+                    raise RuTrackerAuthError(msg)
+
+                print(f"[rutracker] Login OK")
                 return dict(client.cookies)
         except httpx.HTTPError as e:
-            # Сетевые ошибки (таймаут, прокси недоступен, DNS) -> RuTrackerError
+            print(f"[rutracker] Network error: {type(e).__name__}: {e}")
             raise RuTrackerError(f"Сетевая ошибка при входе: {e}")
 
     async def fetch_files(self, torrent_id: str, cookies: dict | None = None) -> list:
