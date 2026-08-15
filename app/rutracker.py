@@ -6,8 +6,10 @@ from bs4 import BeautifulSoup
 
 LOGIN_URL = "https://rutracker.org/forum/login.php"
 TOPIC_URL = "https://rutracker.org/forum/viewtopic.php"
-DEBUG_DUMP_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)),
-                               "..", "data", "debug_last_topic.html")
+
+# Путь для отладочного дампа страницы, если парсинг не удался
+DB_PATH = os.getenv("DB_PATH", "/data/catalog.db")
+DEBUG_DUMP_PATH = os.path.join(os.path.dirname(DB_PATH), "debug_last_topic.html")
 
 SIZE_UNITS = {
     "B": 1, "KB": 1024, "MB": 1024 ** 2, "GB": 1024 ** 3, "TB": 1024 ** 4,
@@ -75,12 +77,11 @@ def parse_files(html: str) -> list:
 
 def save_debug_dump(html: str):
     try:
-        path = os.path.normpath(DEBUG_DUMP_PATH)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        os.makedirs(os.path.dirname(DEBUG_DUMP_PATH), exist_ok=True)
+        with open(DEBUG_DUMP_PATH, "w", encoding="utf-8") as f:
             f.write(html)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[rutracker] Failed to save debug dump: {e}")
 
 
 class RuTrackerClient:

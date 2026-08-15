@@ -23,8 +23,8 @@ from fastapi.templating import Jinja2Templates
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from rutracker import (RuTrackerClient, RuTrackerError,
-                       RuTrackerCaptchaError, RuTrackerAuthError)
+from .rutracker import (RuTrackerClient, RuTrackerError,
+                        RuTrackerCaptchaError, RuTrackerAuthError)
 
 OMDB_KEY = os.getenv("OMDB_API_KEY", "")
 TMDB_KEY = os.getenv("TMDB_API_KEY", "")
