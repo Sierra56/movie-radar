@@ -239,59 +239,78 @@
         border: 1px dashed var(--accent);
     }
 
-    /* Distribution button (top-right, with refresh & delete) */
-    .card-actions .btn-dist {
-        background: var(--delete-btn-bg);
-        opacity: .7;
+    /* Distribution row (below notify checkbox) */
+    .dist-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 8px;
     }
 
-    .card-actions .btn-dist:hover {
+    .dist-row.clickable {
+        cursor: pointer;
+    }
+
+    .dist-row .btn-dist {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        border: 0;
+        font-size: 12px;
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--delete-btn-bg);
+        opacity: .7;
+        flex-shrink: 0;
+    }
+
+    .dist-row.clickable:hover .btn-dist {
         opacity: 1;
     }
 
-    .card-actions .btn-dist.idle {
+    .dist-row .btn-dist.idle {
         background: var(--refresh-btn-bg);
         opacity: 1;
     }
 
-    .card-actions .btn-dist.has_new {
+    .dist-row .btn-dist.has_new {
         background: var(--success);
         opacity: 1;
     }
 
-    .card-actions .btn-dist.downloading {
+    .dist-row .btn-dist.downloading {
         background: var(--accent);
         opacity: 1;
         animation: pulse 1.5s infinite;
     }
 
-    .card-actions .btn-dist.error {
+    .dist-row .btn-dist.error {
         background: var(--warning-bg);
         color: var(--warning-text);
         opacity: 1;
     }
 
-    .card-actions .btn-dist.dead {
+    .dist-row .btn-dist.dead {
         background: var(--delete-btn-bg);
         opacity: .5;
     }
 
-    /* New-episodes indicator (bottom-left corner) */
-    .dist-indicator {
-        position: absolute;
-        bottom: 6px;
-        left: 6px;
-        font-size: 15px;
-        background: var(--tag-bg);
-        border-radius: 999px;
-        padding: 4px 8px;
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        color: #7bd88f;
+    .dist-text {
+        font-size: 12px;
+        color: var(--text-muted);
     }
 
-    .dist-indicator .count {
+    .dist-row.clickable .dist-text {
+        color: var(--text-faint);
+    }
+
+    .dist-row.clickable:hover .dist-text {
+        color: var(--accent);
+    }
+
+    .dist-text .count {
         background: var(--error);
         color: #fff;
         font-size: 10px;
@@ -299,9 +318,10 @@
         min-width: 16px;
         height: 16px;
         padding: 0 4px;
-        display: flex;
+        display: inline-flex;
         align-items: center;
         justify-content: center;
+        margin-left: 4px;
     }
 
     @keyframes pulse {
@@ -457,15 +477,8 @@
         <div class="no-poster">нет постера</div>
         {% endif %}
 
-        {# Top-right actions: distribution + refresh + delete #}
+        {# Top-right actions: refresh + delete #}
         <div class="card-actions">
-            {% if c.has_distribution %}
-            <button class="btn-dist {{ c.distribution_status }}"
-                title="Раздача добавлена (статус: {{ c.distribution_status }})">🎬</button>
-            {% else %}
-            <button class="btn-dist" title="Добавить раздачу"
-                onclick="openDistModal('{{ c.external_id }}', '{{ c.title|e }}')">🎬</button>
-            {% endif %}
             {% if c.source != 'local' %}
             <form method="post" action="/refresh/{{ c.external_id }}?sort={{ sort }}">
                 <button title="Обновить информацию из {{ c.source|upper }}" class="btn-refresh">🔄</button>
@@ -475,13 +488,6 @@
                 <button title="Удалить" class="btn-delete">×</button>
             </form>
         </div>
-
-        {# Bottom-left new-episodes indicator (appears when there are new files) #}
-        {% if c.has_distribution and c.distribution_status == 'has_new' %}
-        <span class="dist-indicator" title="Новые эпизоды в раздаче">
-            🎬{% if c.new_count %}<span class="count">{{ c.new_count }}</span>{% endif %}
-        </span>
-        {% endif %}
 
         <div class="info">
             <h2>{{ c.title }}</h2>
@@ -509,6 +515,26 @@
                     🔔 Уведомления
                 </label>
             </form>
+
+            {# Distribution row (below notify checkbox) #}
+            {% if c.has_distribution %}
+            <div class="dist-row" title="Раздача: {{ c.distribution_status }}">
+                <button class="btn-dist {{ c.distribution_status }}">🎬</button>
+                <span class="dist-text">
+                    {% if c.distribution_status == 'has_new' %}новые эпизоды{% if c.new_count %}<span class="count">{{
+                        c.new_count }}</span>{% endif %}
+                    {% elif c.distribution_status == 'downloading' %}скачивается
+                    {% elif c.distribution_status == 'error' %}ошибка
+                    {% elif c.distribution_status == 'dead' %}неактивна
+                    {% else %}отслеживается{% endif %}
+                </span>
+            </div>
+            {% else %}
+            <div class="dist-row clickable" onclick="openDistModal('{{ c.external_id }}', '{{ c.title|e }}')">
+                <button class="btn-dist" title="Добавить раздачу">🎬</button>
+                <span class="dist-text">добавить раздачу</span>
+            </div>
+            {% endif %}
         </div>
     </article>
     {% else %}
