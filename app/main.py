@@ -1368,7 +1368,6 @@ async def restore_backup(file: UploadFile = File(...)):
             if include_cards:
                 tables_to_restore.extend(CARD_TABLES)
 
-            # sqlite_sequence only exists if AUTOINCREMENT tables have rows
             has_seq_table = conn.execute(
                 "SELECT name FROM backup.sqlite_master "
                 "WHERE type='table' AND name='sqlite_sequence'"
@@ -1396,6 +1395,8 @@ async def restore_backup(file: UploadFile = File(...)):
                             "INSERT INTO main.sqlite_sequence (name, seq) VALUES (?,?)",
                             (table, max_id))
 
+            # Commit BEFORE detach to release locks on the attached database
+            conn.commit()
             conn.execute("DETACH DATABASE backup")
             conn.execute("PRAGMA foreign_keys=ON")
             conn.commit()
