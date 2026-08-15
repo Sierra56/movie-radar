@@ -218,6 +218,7 @@
 <h1 class="page-title">➕ Добавить карточку</h1>
 
 {% if message %}<p class="message">{{ message }}</p>{% endif %}
+{% if error_message %}<p class="error">{{ error_message }}</p>{% endif %}
 
 <div class="search-row">
     <div class="search-input-wrap">
@@ -316,8 +317,10 @@
             renderResults(data.candidates, q);
         } catch (e) {
             resultsDiv.innerHTML = '<p class="modal-loading">Ошибка поиска. Попробуйте ещё раз.</p>';
-            closeModal();
-            showLocalAdd(q);
+            setTimeout(() => {
+                closeModal();
+                showLocalAdd(q);
+            }, 1500);
         }
     }
 

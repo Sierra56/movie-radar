@@ -7,6 +7,7 @@ import uuid
 import hashlib
 import zipfile
 import tempfile
+import traceback
 from abc import ABC, abstractmethod
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
@@ -38,7 +39,6 @@ MONTHS_RU = ["января", "февраля", "марта", "апреля", "м
 
 refresh_progress = {"running": False, "done": 0, "total": 0}
 
-# Backup constants
 BACKUP_VERSION = "1.0.0"
 SETTINGS_TABLES = ["settings", "telegram_settings"]
 CARD_TABLES = ["titles", "seasons", "episodes", "watched_episodes", "updates_log"]
@@ -1250,17 +1250,14 @@ def build_ics(cards: list[dict]) -> str:
 # ── Backup / Restore ──────────────────────────────────
 def _build_backup_zip(include_settings: bool, include_cards: bool,
                       include_images: bool) -> io.BytesIO:
-    """Create a consistent backup ZIP. Returns BytesIO ready to read."""
     tmp_db_fd, tmp_db_path = tempfile.mkstemp(suffix=".db")
     os.close(tmp_db_fd)
     try:
-        # Consistent snapshot via SQLite backup API
         src_conn = sqlite3.connect(DB_PATH)
         dst_conn = sqlite3.connect(tmp_db_path)
         src_conn.backup(dst_conn)
         src_conn.close()
 
-        # Drop tables that are not included in this backup
         if not include_settings:
             for t in SETTINGS_TABLES:
                 dst_conn.execute(f"DROP TABLE IF EXISTS {t}")
@@ -1338,9 +1335,8 @@ async def restore_backup(file: UploadFile = File(...)):
     except (json.JSONDecodeError, KeyError):
         return RedirectResponse("/settings?msg=restore-invalid", status_code=303)
 
-    # Pause scheduler so nothing writes during restore
-    scheduler.pause()
     tmp_path = None
+    scheduler.pause()
     try:
         # Auto-backup current state before overwriting
         try:
@@ -1363,6 +1359,7 @@ async def restore_backup(file: UploadFile = File(...)):
 
         conn = sqlite3.connect(DB_PATH)
         try:
+            conn.execute("PRAGMA foreign_keys=OFF")
             conn.execute("ATTACH DATABASE ? AS backup", (tmp_path,))
 
             tables_to_restore = []
@@ -1370,6 +1367,12 @@ async def restore_backup(file: UploadFile = File(...)):
                 tables_to_restore.extend(SETTINGS_TABLES)
             if include_cards:
                 tables_to_restore.extend(CARD_TABLES)
+
+            # sqlite_sequence only exists if AUTOINCREMENT tables have rows
+            has_seq_table = conn.execute(
+                "SELECT name FROM backup.sqlite_master "
+                "WHERE type='table' AND name='sqlite_sequence'"
+            ).fetchone()
 
             for table in tables_to_restore:
                 row = conn.execute(
@@ -1379,20 +1382,22 @@ async def restore_backup(file: UploadFile = File(...)):
                     continue
                 conn.execute(f"DELETE FROM main.{table}")
                 conn.execute(f"INSERT INTO main.{table} SELECT * FROM backup.{table}")
-                # Fix autoincrement sequence so new inserts don't collide
-                has_seq = conn.execute(
-                    "SELECT 1 FROM backup.sqlite_sequence WHERE name=?",
-                    (table,)).fetchone()
-                if has_seq:
-                    max_id = conn.execute(
-                        f"SELECT MAX(id) FROM main.{table}").fetchone()[0] or 0
-                    conn.execute(
-                        "DELETE FROM main.sqlite_sequence WHERE name=?", (table,))
-                    conn.execute(
-                        "INSERT INTO main.sqlite_sequence (name, seq) VALUES (?,?)",
-                        (table, max_id))
+
+                if has_seq_table:
+                    has_seq = conn.execute(
+                        "SELECT 1 FROM backup.sqlite_sequence WHERE name=?",
+                        (table,)).fetchone()
+                    if has_seq:
+                        max_id = conn.execute(
+                            f"SELECT MAX(id) FROM main.{table}").fetchone()[0] or 0
+                        conn.execute(
+                            "DELETE FROM main.sqlite_sequence WHERE name=?", (table,))
+                        conn.execute(
+                            "INSERT INTO main.sqlite_sequence (name, seq) VALUES (?,?)",
+                            (table, max_id))
 
             conn.execute("DETACH DATABASE backup")
+            conn.execute("PRAGMA foreign_keys=ON")
             conn.commit()
         finally:
             conn.close()
@@ -1408,7 +1413,7 @@ async def restore_backup(file: UploadFile = File(...)):
                     with zf.open(name) as src, open(target, "wb") as dst:
                         dst.write(src.read())
 
-        # Re-apply restored settings (refresh period, telegram schedule)
+        # Re-apply restored settings
         try:
             scheduler.reschedule_job("refresh", trigger="interval",
                                      hours=get_refresh_hours())
@@ -1418,6 +1423,7 @@ async def restore_backup(file: UploadFile = File(...)):
 
     except Exception as e:
         print(f"[backup] Restore error: {e}")
+        traceback.print_exc()
         return RedirectResponse("/settings?msg=restore-error", status_code=303)
     finally:
         scheduler.resume()
@@ -1527,7 +1533,7 @@ async def index(request: Request, sort: str = "date",
         c["display_poster"] = ensure_proxied(c.get("display_poster"))
         cards.append(c)
 
-    messages = {
+    success_messages = {
         "refresh-started": "Обновление запущено в фоне.",
         "card-updated": "Карточка обновлена.",
     }
@@ -1536,22 +1542,26 @@ async def index(request: Request, sort: str = "date",
         request, "index.html", {
             "cards": cards, "sort": sort,
             "error": "Ничего не нашлось — уточните название." if err else None,
-            "message": messages.get(msg),
+            "message": success_messages.get(msg),
+            "error_message": None,
         })
 
 
 @app.get("/new", response_class=HTMLResponse)
 async def new_card_page(request: Request, msg: str | None = None):
-    messages = {
+    success_messages = {
         "added-local": "Карточка добавлена локально.",
         "added": "Карточка добавлена.",
+    }
+    error_messages = {
         "search-fail": "Не удалось получить данные по выбранной карточке.",
     }
     return templates.TemplateResponse(
         request, "add.html", {
             "sources": list(SOURCES.keys()),
             "default_source": request.cookies.get("source", "tmdb"),
-            "message": messages.get(msg),
+            "message": success_messages.get(msg),
+            "error_message": error_messages.get(msg),
         })
 
 
@@ -1651,21 +1661,25 @@ async def settings_page(request: Request, msg: str | None = None):
     log_rows = db("SELECT * FROM updates_log ORDER BY created_at DESC LIMIT 200")
     proxy_url = get_setting("proxy_url", "") or ""
     theme = get_setting("theme", "dark")
-    messages = {
+
+    success_messages = {
         "refresh-saved": "Период обновления сохранён.",
         "telegram-saved": "Настройки Telegram сохранены.",
         "proxy-saved": "Настройки прокси сохранены.",
         "proxy-ok": "Прокси работает! Соединение установлено.",
-        "proxy-fail": "Не удалось подключиться через прокси. Проверьте URL.",
-        "proxy-not-set": "Прокси не настроен. Укажите URL прокси.",
         "theme-saved": "Тема сохранена.",
         "test-ok": "Тестовое сообщение отправлено!",
+        "restore-ok": "Восстановление завершено. Данные заменены из бэкапа.",
+    }
+    error_messages = {
+        "proxy-fail": "Не удалось подключиться через прокси. Проверьте URL.",
+        "proxy-not-set": "Прокси не настроен. Укажите URL прокси.",
         "test-fail": "Не удалось отправить. Проверьте токен и chat_id.",
         "backup-empty": "Выберите хотя бы один компонент для бэкапа.",
-        "restore-ok": "Восстановление завершено. Данные заменены из бэкапа.",
         "restore-invalid": "Неверный файл бэкапа. Ожидается архив movie-radar.",
-        "restore-error": "Ошибка при восстановлении. Проверьте файл.",
+        "restore-error": "Ошибка при восстановлении. Подробности в логах контейнера.",
     }
+
     return templates.TemplateResponse(
         request, "settings.html", {
             "tg": s,
@@ -1674,7 +1688,8 @@ async def settings_page(request: Request, msg: str | None = None):
             "log_rows": [dict(r) for r in log_rows],
             "proxy_url": proxy_url,
             "theme": theme,
-            "message": messages.get(msg),
+            "message": success_messages.get(msg),
+            "error_message": error_messages.get(msg),
         })
 
 
