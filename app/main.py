@@ -486,11 +486,17 @@ def ensure_schema():
             encrypted_password TEXT DEFAULT '',
             encrypted_cookies TEXT DEFAULT '',
             cookies_expires_at TEXT,
+            user_agent TEXT DEFAULT '',
             enabled INTEGER DEFAULT 1,
             last_login_at TEXT,
             last_error TEXT,
             error_count INTEGER DEFAULT 0
          )""", write=True)
+    try:
+        db("ALTER TABLE tracker_credentials ADD COLUMN user_agent TEXT DEFAULT ''",
+           write=True)
+    except sqlite3.OperationalError:
+        pass
 
     db("""CREATE TABLE IF NOT EXISTS transmission_settings (
             id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -622,7 +628,6 @@ def get_distribution(title_external_id: str) -> dict | None:
 
 
 def load_tracker_cookies(tracker_name: str) -> dict | None:
-    """Расшифровывает и возвращает cookies трекера как dict."""
     creds = get_tracker_credentials(tracker_name)
     if not creds or not creds.get("encrypted_cookies"):
         return None
@@ -634,6 +639,22 @@ def load_tracker_cookies(tracker_name: str) -> dict | None:
     except Exception as e:
         print(f"[tracker] Failed to load cookies: {e}")
         return None
+
+
+def build_tracker_client(tracker_name: str = "rutracker",
+                         cookies: dict | None = None) -> RuTrackerClient:
+    """Собирает клиент трекера с учётом сохранённых cookies и UA."""
+    creds = get_tracker_credentials(tracker_name) or {}
+    username = creds.get("username", "")
+    password = decrypt_value(creds.get("encrypted_password", "")) if creds.get("encrypted_password") else ""
+    user_agent = creds.get("user_agent", "")
+    effective_cookies = cookies if cookies is not None else load_tracker_cookies(tracker_name)
+    return RuTrackerClient(
+        username=username,
+        password=password,
+        proxy=get_proxy_url(),
+        cookies=effective_cookies,
+        user_agent=user_agent)
 
 
 templates.env.globals["get_theme"] = get_theme
@@ -1653,7 +1674,6 @@ async def check_distribution_now(title_external_id: str) -> tuple:
     if not creds or not creds.get("enabled"):
         return False, "Трекер не включён в настройках"
 
-    # Приоритет: cookies → логин/пароль
     cookies = load_tracker_cookies(dist["tracker_name"])
     username = creds.get("username", "")
     password = decrypt_value(creds.get("encrypted_password", "")) if creds.get("encrypted_password") else ""
@@ -1661,17 +1681,11 @@ async def check_distribution_now(title_external_id: str) -> tuple:
     if not cookies and not (username and password):
         return False, "Не настроены учётные данные трекера"
 
-    client = RuTrackerClient(
-        username=username,
-        password=password,
-        proxy=get_proxy_url(),
-        cookies=cookies)
+    client = build_tracker_client(dist["tracker_name"], cookies=cookies)
 
-    # Используем cookies если есть
     if cookies:
         print("[dist-check] Using saved cookies")
     else:
-        # Попытка логина как fallback
         try:
             cookies = await client.login()
         except RuTrackerCaptchaError:
@@ -1687,7 +1701,6 @@ async def check_distribution_now(title_external_id: str) -> tuple:
                (str(e), dist["tracker_name"]), write=True)
             return False, str(e)
 
-        # Сохраняем cookies
         db("""UPDATE tracker_credentials SET encrypted_cookies=?, last_login_at=datetime('now'),
               last_error=NULL, error_count=0 WHERE tracker_name=?""",
            (encrypt_value(json.dumps(cookies)), dist["tracker_name"]), write=True)
@@ -1697,7 +1710,6 @@ async def check_distribution_now(title_external_id: str) -> tuple:
     except RuTrackerForbiddenError as e:
         db("UPDATE distributions SET status='error', error_message=? WHERE id=?",
            (str(e), dist["id"]), write=True)
-        # Возможно cookies истекли — попробуем перелогиниться если есть пароль
         if username and password:
             print("[dist-check] 403 on fetch, attempting re-login")
             try:
@@ -1771,13 +1783,8 @@ async def test_tracker_login():
         print("[tracker-test] No cookies and no credentials")
         return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
 
-    client = RuTrackerClient(
-        username=username,
-        password=password,
-        proxy=get_proxy_url(),
-        cookies=cookies)
+    client = build_tracker_client("rutracker", cookies=cookies)
 
-    # Приоритет: проверяем cookies если есть
     if cookies:
         print("[tracker-test] Validating saved cookies")
         is_valid = await client.validate_cookies(cookies)
@@ -1787,7 +1794,6 @@ async def test_tracker_login():
                write=True)
             return RedirectResponse("/settings?msg=tracker-test-ok", status_code=303)
         else:
-            # Cookies невалидны — попробуем логин если есть пароль
             if username and password:
                 print("[tracker-test] Cookies invalid, attempting login")
             else:
@@ -1795,7 +1801,6 @@ async def test_tracker_login():
                    write=True)
                 return RedirectResponse("/settings?msg=tracker-cookies-invalid", status_code=303)
 
-    # Попытка логина
     try:
         new_cookies = await client.login()
         db("""UPDATE tracker_credentials SET encrypted_cookies=?,
@@ -1825,7 +1830,7 @@ async def test_tracker_login():
         return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
 
 
-# ── Routes ────────────────────────────────────────────
+# ── Routes ───────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request, sort: str = "date",
                 err: str | None = None, msg: str | None = None):
@@ -2022,7 +2027,6 @@ async def settings_page(request: Request, msg: str | None = None):
     trans = get_transmission_settings()
     tracker = get_tracker_credentials("rutracker")
 
-    # Индикатор наличия cookies
     tracker_has_cookies = False
     if tracker and tracker.get("encrypted_cookies"):
         tracker_has_cookies = bool(decrypt_value(tracker["encrypted_cookies"]))
@@ -2200,13 +2204,12 @@ async def save_tracker(tracker_name: str = Form("rutracker"),
                        username: str = Form(""),
                        password: str = Form(""),
                        cookies_manual: str = Form(""),
+                       user_agent: str = Form(""),
                        enabled: str = Form("off")):
-    """Сохраняет настройки трекера. Если указаны cookies — использует их.
-    Иначе — логин/пароль как fallback."""
     enabled_val = 1 if enabled == "on" else 0
     encrypted_pwd = encrypt_value(password.strip()) if password else ""
+    ua_val = user_agent.strip()
 
-    # Если введены cookies вручную — парсим и сохраняем их
     if cookies_manual.strip():
         try:
             cookies_dict = {}
@@ -2220,18 +2223,18 @@ async def save_tracker(tracker_name: str = Form("rutracker"),
                 return RedirectResponse("/settings?msg=tracker-cookies-invalid", status_code=303)
 
             db("""INSERT OR REPLACE INTO tracker_credentials
-                  (tracker_name, username, encrypted_password, encrypted_cookies, enabled)
-                  VALUES (?,?,?,?,?)""",
+                  (tracker_name, username, encrypted_password, encrypted_cookies, user_agent, enabled)
+                  VALUES (?,?,?,?,?,?)""",
                (tracker_name, username.strip(), encrypted_pwd,
-                encrypt_value(json.dumps(cookies_dict)), enabled_val),
+                encrypt_value(json.dumps(cookies_dict)), ua_val, enabled_val),
                write=True)
 
-            # Сразу валидируем cookies
             client = RuTrackerClient(
                 username=username.strip(),
                 password=password.strip(),
                 proxy=get_proxy_url(),
-                cookies=cookies_dict)
+                cookies=cookies_dict,
+                user_agent=ua_val)
             is_valid = await client.validate_cookies(cookies_dict)
             if is_valid:
                 db("UPDATE tracker_credentials SET last_login_at=datetime('now'), last_error=NULL WHERE tracker_name=?",
@@ -2247,11 +2250,14 @@ async def save_tracker(tracker_name: str = Form("rutracker"),
             print(f"[tracker] Error parsing cookies: {e}")
             return RedirectResponse("/settings?msg=tracker-cookies-invalid", status_code=303)
 
-    # Обычное сохранение логин/пароль (cookies не трогаем если уже есть)
+    # Сохраняем логин/пароль/UA, cookies не трогаем если уже есть
+    existing = get_tracker_credentials(tracker_name)
+    existing_cookies = existing.get("encrypted_cookies", "") if existing else ""
     db("""INSERT OR REPLACE INTO tracker_credentials
-          (tracker_name, username, encrypted_password, enabled)
-          VALUES (?,?,?,?)""",
-       (tracker_name, username.strip(), encrypted_pwd, enabled_val),
+          (tracker_name, username, encrypted_password, encrypted_cookies, user_agent, enabled)
+          VALUES (?,?,?,?,?,?)""",
+       (tracker_name, username.strip(), encrypted_pwd, existing_cookies,
+        ua_val, enabled_val),
        write=True)
     return RedirectResponse("/settings?msg=tracker-saved", status_code=303)
 

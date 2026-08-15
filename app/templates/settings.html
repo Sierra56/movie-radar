@@ -479,28 +479,42 @@
         <div class="field">
             <label>Cookies из браузера</label>
             <textarea name="cookies_manual" rows="4"
-                placeholder="bb_data=abc123...; bb_session=def456...; bb_ssl=ghi789..."></textarea>
+                placeholder="bb_guid=...; bb_session=...; bb_ssl=1; bb_t=...; cf_clearance=...; VID=..."></textarea>
             <p class="hint">
-                Вставьте cookies в формате <code>name1=value1; name2=value2; name3=value3</code>.
+                Вставьте cookies в формате <code>name1=value1; name2=value2; ...</code>.
                 После сохранения они будут зашифрованы и сохранены в БД.
             </p>
         </div>
 
+        <div class="field">
+            <label>User-Agent вашего браузера (обязательно!)</label>
+            <input type="text" name="user_agent" value="{{ tracker.get('user_agent', '') if tracker else '' }}"
+                placeholder="Mozilla/5.0 (X11; Linux x86_64) ... Chrome/138.0 ...">
+            <p class="hint">
+                Cookie <code>cf_clearance</code> привязана к User-Agent. Сервер должен делать запросы
+                с тем же UA, что и ваш браузер, иначе Cloudflare отклонит запрос.
+            </p>
+        </div>
+
         <div class="info-box">
-            <strong>Как получить cookies:</strong>
+            <strong>Как скопировать cookies и User-Agent одной строкой:</strong>
             <ol>
-                <li>Откройте <strong>rutracker.org</strong> в Chrome или Firefox и войдите в свой аккаунт</li>
-                <li>Нажмите <strong>F12</strong> (откроется DevTools)</li>
-                <li>Перейдите на вкладку <strong>Application</strong> (Chrome) или <strong>Storage</strong> (Firefox)
+                <li>Откройте <strong>rutracker.org</strong> в браузере (через тот же прокси, что использует приложение)
                 </li>
-                <li>Слева найдите <strong>Cookies</strong> → <code>https://rutracker.org</code></li>
-                <li>Скопируйте значения cookies <code>bb_data</code> и <code>bb_session</code> (и <code>bb_ssl</code>,
-                    если есть)</li>
-                <li>Вставьте в формате: <code>bb_data=значение1; bb_session=значение2</code></li>
+                <li>Нажмите <strong>F12</strong> → вкладка <strong>Network</strong></li>
+                <li>Обновите страницу (<strong>F5</strong>)</li>
+                <li>Кликните на первый запрос к <code>rutracker.org</code> (например, <code>index.php</code>)</li>
+                <li>В правой панели найдите <strong>Request Headers</strong>:
+                    <ul style="margin:4px 0 0 18px;">
+                        <li>скопируйте всё значение после <code>cookie:</code> → вставьте в поле «Cookies»</li>
+                        <li>скопируйте значение после <code>user-agent:</code> → вставьте в поле «User-Agent»</li>
+                    </ul>
+                </li>
             </ol>
             <p style="margin-top:8px;">
-                <strong>Альтернатива:</strong> расширение <code>EditThisCookie</code> или <code>Cookie-Editor</code>
-                позволяет экспортировать все cookies одной строкой.
+                <strong>Важно:</strong> браузер должен ходить через тот же прокси
+                (<code>{{ proxy_url or 'прокси не задан' }}</code>), что и приложение —
+                иначе <code>cf_clearance</code> не сработает из-за несовпадения IP.
             </p>
             <p style="margin-top:8px;">
                 <strong>Срок действия:</strong> cookies rutracker обычно живут несколько месяцев.

@@ -17,10 +17,12 @@ SIZE_UNITS = {
 
 _SIZE_RE = re.compile(r"([\d.,]+)\s*(Б|КБ|МБ|ГБ|ТБ|B|KB|MB|GB|TB)", re.I)
 
-_BROWSER_HEADERS = {
-    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                   "AppleWebKit/537.36 (KHTML, like Gecko) "
-                   "Chrome/126.0.0.0 Safari/537.36"),
+# Дефолтные браузерные заголовки (User-Agent может быть переопределён)
+_DEFAULT_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+               "AppleWebKit/537.36 (KHTML, like Gecko) "
+               "Chrome/126.0.0.0 Safari/537.36")
+
+_BASE_HEADERS = {
     "Accept": ("text/html,application/xhtml+xml,application/xml;"
                "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"),
     "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -29,15 +31,6 @@ _BROWSER_HEADERS = {
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"Windows"',
     "Upgrade-Insecure-Requests": "1",
-}
-
-_POST_HEADERS = {
-    **_BROWSER_HEADERS,
-    "Content-Type": "application/x-www-form-urlencoded",
-    "sec-fetch-dest": "document",
-    "sec-fetch-mode": "navigate",
-    "sec-fetch-site": "same-origin",
-    "sec-fetch-user": "?1",
 }
 
 
@@ -120,8 +113,7 @@ def _extract_form_fields(html: str, action_contains: str = "login") -> dict:
                 continue
             itype = (inp.get("type") or "").lower()
             if itype in ("hidden", "checkbox"):
-                value = inp.get("value", "")
-                result[name] = value
+                result[name] = inp.get("value", "")
             elif itype == "submit":
                 result[name] = inp.get("value", "")
         for sel in form.find_all("select"):
@@ -136,57 +128,67 @@ def _extract_form_fields(html: str, action_contains: str = "login") -> dict:
 
 class RuTrackerClient:
     def __init__(self, username: str = "", password: str = "",
-                 proxy: str | None = None, cookies: dict | None = None):
+                 proxy: str | None = None, cookies: dict | None = None,
+                 user_agent: str | None = None):
         self.username = username
         self.password = password
         self.proxy = proxy
         self.initial_cookies = cookies or {}
+        # User-Agent должен совпадать с тем, что был при получении cf_clearance
+        self.user_agent = (user_agent or "").strip() or _DEFAULT_UA
+
+    def _headers(self, extra: dict | None = None) -> dict:
+        h = {**_BASE_HEADERS, "User-Agent": self.user_agent}
+        if extra:
+            h.update(extra)
+        return h
+
+    def _post_headers(self) -> dict:
+        return self._headers({
+            "Content-Type": "application/x-www-form-urlencoded",
+            "sec-fetch-dest": "document",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-site": "same-origin",
+            "sec-fetch-user": "?1",
+        })
 
     def _client(self, cookies: dict | None = None) -> httpx.AsyncClient:
         kwargs = {"timeout": 30, "follow_redirects": True}
         if self.proxy:
             kwargs["proxy"] = self.proxy
         client = httpx.AsyncClient(**kwargs)
-        # Используем переданные cookies или initial
         effective_cookies = cookies or self.initial_cookies
         if effective_cookies:
             client.cookies = dict(effective_cookies)
         return client
 
     async def validate_cookies(self, cookies: dict) -> bool:
-        """Проверяет валидность cookies без попытки логина.
-        Делает GET на index.php и проверяет наличие признаков авторизации."""
+        """Проверяет валидность cookies без попытки логина."""
         if not cookies:
             return False
         print(f"[rutracker] Validating cookies: keys={list(cookies.keys())}")
+        print(f"[rutracker] Using User-Agent: {self.user_agent[:60]}...")
         try:
             async with self._client(cookies) as client:
-                r = await client.get(INDEX_URL, headers=_BROWSER_HEADERS)
+                r = await client.get(INDEX_URL, headers=self._headers())
                 print(f"[rutracker]   index status={r.status_code}")
 
                 if r.status_code == 403:
                     print("[rutracker]   403 Forbidden (Cloudflare)")
+                    save_debug_dump(r.text)
                     return False
 
                 low = r.text.lower()
-                # Cloudflare challenge
-                if "just a moment" in low or "cloudflare" in low and "challenge" in low:
+                if "just a moment" in low or ("cloudflare" in low and "challenge" in low):
                     print("[rutracker]   Cloudflare challenge detected")
+                    save_debug_dump(r.text)
                     return False
 
-                # Проверяем признаки авторизации
-                # У залогиненного пользователя есть ссылка на выход (logout) или профиль
-                # У не залогиненного — ссылка на вход (login.php)
                 soup = BeautifulSoup(r.text, "html.parser")
-
-                # Ищем кнопку/ссылку "Выйти" или "logout"
                 logout_indicators = ["logout", "выйти", "выход"]
                 has_logout = any(ind in low for ind in logout_indicators)
-
-                # Ищем username в HTML (он обычно показывается в шапке)
                 username_in_page = self.username.lower() in low if self.username else False
 
-                # Если есть logout или username на странице — cookies валидны
                 if has_logout or username_in_page:
                     print(f"[rutracker]   Cookies valid (logout={has_logout}, username_in_page={username_in_page})")
                     return True
@@ -207,7 +209,7 @@ class RuTrackerClient:
             async with self._client() as client:
                 print("[rutracker] Step 1: GET index.php to prime cookies")
                 try:
-                    r_idx = await client.get(INDEX_URL, headers=_BROWSER_HEADERS)
+                    r_idx = await client.get(INDEX_URL, headers=self._headers())
                     print(f"[rutracker]   index status={r_idx.status_code}")
                 except Exception as e:
                     print(f"[rutracker]   index failed: {e}")
@@ -216,7 +218,7 @@ class RuTrackerClient:
                 try:
                     r_form = await client.get(
                         LOGIN_URL,
-                        headers={**_BROWSER_HEADERS, "Referer": INDEX_URL},
+                        headers=self._headers({"Referer": INDEX_URL}),
                     )
                     print(f"[rutracker]   login form status={r_form.status_code}")
                     form_fields = _extract_form_fields(r_form.text, "login")
@@ -238,11 +240,9 @@ class RuTrackerClient:
                 r = await client.post(
                     LOGIN_URL,
                     data=post_data,
-                    headers={
-                        **_POST_HEADERS,
-                        "Referer": LOGIN_URL,
-                        "Origin": "https://rutracker.org",
-                    },
+                    headers={**self._post_headers(),
+                             "Referer": LOGIN_URL,
+                             "Origin": "https://rutracker.org"},
                 )
                 print(f"[rutracker]   login POST status={r.status_code} url={r.url}")
 
@@ -285,7 +285,7 @@ class RuTrackerClient:
                 r = await client.get(
                     TOPIC_URL,
                     params={"t": torrent_id},
-                    headers={**_BROWSER_HEADERS, "Referer": INDEX_URL},
+                    headers=self._headers({"Referer": INDEX_URL}),
                 )
                 if r.status_code == 404:
                     raise RuTrackerError("Раздача не найдена (404)")
