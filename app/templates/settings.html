@@ -133,6 +133,20 @@
         color: var(--text-muted);
         margin-top: 8px;
     }
+
+    .status-line {
+        font-size: 13px;
+        margin-top: 12px;
+        color: var(--text-muted);
+    }
+
+    .status-line.ok {
+        color: var(--success);
+    }
+
+    .status-line.err {
+        color: var(--error);
+    }
 </style>
 {% endblock %}
 
@@ -151,6 +165,8 @@
                 <option value="dark" {% if theme=='dark' %}selected{% endif %}>🌙 Тёмная</option>
                 <option value="light" {% if theme=='light' %}selected{% endif %}>☀️ Светлая</option>
             </select>
+            <p class="hint">Сейчас: {% if theme == 'light' %}светлая{% else %}тёмная{% endif %}. Применяется сразу после
+                сохранения.</p>
         </div>
         <div class="btn-row"><button type="submit">Сохранить тему</button></div>
     </form>
@@ -170,7 +186,7 @@
                 <option value="72" {% if refresh_hours==72 %}selected{% endif %}>раз в 3 дня</option>
                 <option value="168" {% if refresh_hours==168 %}selected{% endif %}>раз в неделю</option>
             </select>
-            <p class="hint">Сейчас: {{ refresh_label }}.</p>
+            <p class="hint">Сейчас: {{ refresh_label }}. Настройка сохраняется в БД и переживает перезапуск.</p>
         </div>
         <div class="btn-row"><button type="submit">Сохранить</button></div>
     </form>
@@ -182,11 +198,15 @@
         <div class="field">
             <label>URL прокси-сервера</label>
             <input type="text" name="proxy_url" value="{{ proxy_url }}" placeholder="http://proxy.example.com:8080">
-            <p class="hint">Применяется к OMDB, TMDB, Telegram и торрент-трекерам.</p>
+            <p class="hint">
+                Форматы: <code>http://host:port</code>, <code>http://user:pass@host:port</code>,
+                <code>socks5://host:port</code>.
+                Применяется к запросам OMDB, TMDB, Telegram и торрент-трекерам.
+            </p>
         </div>
         <div class="btn-row">
             <button type="submit">Сохранить</button>
-            <button type="submit" formaction="/settings/proxy/test" class="secondary">🔍 Проверить</button>
+            <button type="submit" formaction="/settings/proxy/test" class="secondary">🔍 Проверить подключение</button>
         </div>
     </form>
 </div>
@@ -198,39 +218,49 @@
             <label>Bot Token (от @BotFather)</label>
             <input type="password" name="bot_token" value="{{ tg.get('bot_token', '') }}"
                 placeholder="123456:ABC-DEF...">
+            <p class="hint">Создайте бота через @BotFather и скопируйте токен.</p>
         </div>
+
         <div class="field">
             <label>Chat ID</label>
             <input type="text" name="chat_id" value="{{ tg.get('chat_id', '') }}" placeholder="123456789">
+            <p class="hint">Узнайте свой ID через @userinfobot или @getmyid_bot.</p>
         </div>
+
         <div class="check-row">
             <input type="checkbox" name="enabled" id="enabled" {% if tg.get('enabled') %}checked{% endif %}>
             <label for="enabled">Включить уведомления о релизах</label>
         </div>
+
         <div class="check-row">
             <input type="checkbox" name="notify_date_changes" id="notify_date_changes" {% if
                 tg.get('notify_date_changes', 1) %}checked{% endif %}>
             <label for="notify_date_changes">Уведомлять о переносе дат</label>
         </div>
+
         <div class="check-row">
             <input type="checkbox" name="notify_new_cards" id="notify_new_cards" {% if tg.get('notify_new_cards', 1)
                 %}checked{% endif %}>
             <label for="notify_new_cards">Уведомлять о новых карточках</label>
         </div>
+
         <div class="check-row">
             <input type="checkbox" name="notify_new_seasons" id="notify_new_seasons" {% if tg.get('notify_new_seasons',
                 1) %}checked{% endif %}>
             <label for="notify_new_seasons">Уведомлять о новых сезонах</label>
         </div>
+
         <div class="check-row">
             <input type="checkbox" name="notify_new_episodes" id="notify_new_episodes" {% if
                 tg.get('notify_new_episodes', 1) %}checked{% endif %}>
             <label for="notify_new_episodes">Уведомлять о новых эпизодах</label>
         </div>
+
         <div class="field">
             <label>Время отправки ежедневной рассылки</label>
             <input type="time" name="send_time" value="{{ tg.get('send_time', '09:00') }}">
         </div>
+
         <div class="field">
             <label>Уведомлять за сколько дней до релиза</label>
             <select name="notify_days">
@@ -240,8 +270,10 @@
                 <option value="7" {% if tg.get('notify_days')==7 %}selected{% endif %}>за неделю</option>
             </select>
         </div>
+
         <div class="btn-row"><button type="submit">Сохранить</button></div>
     </form>
+
     {% if tg.get('last_sent') %}
     <p class="last-sent">Последняя отправка: {{ tg['last_sent'] }}</p>
     {% endif %}
@@ -249,27 +281,234 @@
 
 <div class="section">
     <h2>🧪 Тестирование уведомлений</h2>
+    <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px">
+        Отправьте тестовые сообщения каждого типа, чтобы убедиться что всё работает.
+        Тесты отправляются независимо от переключателей уведомлений.
+    </p>
     <div class="btn-row">
         <form method="post" action="/settings/telegram/test/simple">
-            <button type="submit" class="secondary small">💬 Простое</button>
+            <button type="submit" class="secondary small">💬 Простое сообщение</button>
         </form>
         <form method="post" action="/settings/telegram/test/date-change">
             <button type="submit" class="secondary small">📅 Перенос даты</button>
         </form>
         <form method="post" action="/settings/telegram/test/new-card">
-            <button type="submit" class="secondary small">🆕 Карточка</button>
+            <button type="submit" class="secondary small">🆕 Новая карточка</button>
         </form>
         <form method="post" action="/settings/telegram/test/new-season">
-            <button type="submit" class="secondary small">📺 Сезон</button>
+            <button type="submit" class="secondary small">📺 Новый сезон</button>
         </form>
         <form method="post" action="/settings/telegram/test/new-episodes">
-            <button type="submit" class="secondary small">🎬 Эпизод</button>
+            <button type="submit" class="secondary small">🎬 Новый эпизод</button>
         </form>
         <form method="post" action="/settings/telegram/test/daily">
-            <button type="submit" class="secondary small">🔔 Рассылка</button>
+            <button type="submit" class="secondary small">🔔 Ежедневная рассылка</button>
         </form>
     </div>
 </div>
 
 <div class="section">
-    <h2>📡 Transmission
+    <h2>📡 Transmission</h2>
+    <form method="post" action="/settings/transmission">
+        <div class="check-row">
+            <input type="checkbox" name="enabled" id="trans-enabled" {% if trans.get('enabled') %}checked{% endif %}>
+            <label for="trans-enabled">Включить интеграцию с Transmission</label>
+        </div>
+
+        <div class="two-col">
+            <div class="field">
+                <label>Хост</label>
+                <input type="text" name="host" value="{{ trans.get('host', 'localhost') }}" placeholder="192.168.0.46">
+            </div>
+            <div class="field">
+                <label>Порт</label>
+                <input type="number" name="port" value="{{ trans.get('port', 9091) }}" placeholder="9091">
+            </div>
+        </div>
+
+        <div class="two-col">
+            <div class="field">
+                <label>Логин (если есть)</label>
+                <input type="text" name="username" value="{{ trans.get('username', '') }}">
+            </div>
+            <div class="field">
+                <label>Пароль (если есть)</label>
+                <input type="password" name="password" placeholder="••••••••">
+                <p class="hint">Хранится в зашифрованном виде.</p>
+            </div>
+        </div>
+
+        <div class="field">
+            <label>Базовая директория для скачивания</label>
+            <input type="text" name="base_download_dir" value="{{ trans.get('base_download_dir', '') }}"
+                placeholder="/media/downloads">
+            <p class="hint">Используется как путь по умолчанию, если для раздачи не указан свой.</p>
+        </div>
+
+        <div class="field">
+            <label>Действие при появлении новых эпизодов</label>
+            <select name="action_on_new">
+                <option value="download" {% if trans.get('action_on_new')=='download' %}selected{% endif %}>
+                    Скачивать сразу и уведомлять
+                </option>
+                <option value="pause" {% if trans.get('action_on_new')=='pause' %}selected{% endif %}>
+                    Скачивать, но ставить на паузу
+                </option>
+                <option value="notify_only" {% if trans.get('action_on_new')=='notify_only' %}selected{% endif %}>
+                    Только уведомлять, не скачивать
+                </option>
+            </select>
+        </div>
+
+        <div class="check-row">
+            <input type="checkbox" name="filter_recent_only" id="filter-recent" {% if trans.get('filter_recent_only', 1)
+                %}checked{% endif %}>
+            <label for="filter-recent">Скачивать только свежие эпизоды (за последние 30 дней)</label>
+        </div>
+
+        <div class="two-col">
+            <div class="field">
+                <label>Мин. размер файла (МБ)</label>
+                <input type="number" name="min_file_size_mb" value="{{ trans.get('min_file_size_mb', 500) }}" min="1">
+                <p class="hint">Файлы меньше не скачиваются (сэмплы, промо).</p>
+            </div>
+            <div class="field">
+                <label>Интервал проверки по умолчанию (часов)</label>
+                <input type="number" name="default_check_interval" value="{{ trans.get('default_check_interval', 6) }}"
+                    min="1" max="168">
+            </div>
+        </div>
+
+        <div class="btn-row">
+            <button type="submit">Сохранить</button>
+        </div>
+    </form>
+</div>
+
+<div class="section">
+    <h2>🌍 Торрент-трекер: rutracker.org</h2>
+    <form method="post" action="/settings/tracker">
+        <input type="hidden" name="tracker_name" value="rutracker">
+
+        <div class="check-row">
+            <input type="checkbox" name="enabled" id="tracker-enabled" {% if tracker and tracker.get('enabled')
+                %}checked{% endif %}>
+            <label for="tracker-enabled">Включить отслеживание раздач</label>
+        </div>
+
+        <div class="two-col">
+            <div class="field">
+                <label>Логин</label>
+                <input type="text" name="username" value="{{ tracker.get('username', '') if tracker else '' }}">
+            </div>
+            <div class="field">
+                <label>Пароль</label>
+                <input type="password" name="password" placeholder="••••••••">
+                <p class="hint">Пароль хранится в зашифрованном виде и используется только для входа.</p>
+            </div>
+        </div>
+
+        {% if tracker and tracker.get('last_error') %}
+        <p class="status-line err">Последняя ошибка: {{ tracker['last_error'] }}</p>
+        {% endif %}
+        {% if tracker and tracker.get('last_login_at') %}
+        <p class="status-line ok">Последний вход: {{ tracker['last_login_at'] }}</p>
+        {% endif %}
+
+        <p class="warning-text">
+            ⚠️ Автоматизация может нарушать правила трекера и привести к бану аккаунта.
+            Рекомендуется использовать отдельный аккаунт и умеренные интервалы проверки.
+        </p>
+
+        <div class="btn-row">
+            <button type="submit">Сохранить</button>
+            <button type="submit" formaction="/settings/tracker/test" class="secondary">🔑 Проверить вход</button>
+        </div>
+    </form>
+</div>
+
+<div class="section">
+    <h2>💾 Бэкап и восстановление</h2>
+
+    <h3>Создать бэкап</h3>
+    <form method="post" action="/backup/create">
+        <div class="check-row">
+            <input type="checkbox" name="include_settings" id="bk-settings" checked>
+            <label for="bk-settings">Настройки (тема, период, прокси, Telegram)</label>
+        </div>
+        <div class="check-row">
+            <input type="checkbox" name="include_cards" id="bk-cards" checked>
+            <label for="bk-cards">Фильмы и сериалы (карточки, сезоны, эпизоды, прогресс)</label>
+        </div>
+        <div class="check-row">
+            <input type="checkbox" name="include_images" id="bk-images" checked>
+            <label for="bk-images">Картинки (постеры, кадры)</label>
+        </div>
+        <div class="check-row">
+            <input type="checkbox" name="include_torrents" id="bk-torrents" checked>
+            <label for="bk-torrents">Торрент-раздачи и настройки</label>
+        </div>
+        <p class="hint">
+            Торрент-файлы (.torrent) и ключ шифрования в бэкап не включаются.
+            При восстановлении на другой машине зашифрованные пароли трекеров не будут работать.
+        </p>
+        <div class="btn-row">
+            <button type="submit">📥 Скачать бэкап (.zip)</button>
+        </div>
+    </form>
+
+    <h3>Восстановление из бэкапа</h3>
+    <form method="post" action="/backup/restore" enctype="multipart/form-data" onsubmit="return confirmRestore()">
+        <div class="field">
+            <label for="restore-file">Файл бэкапа (.zip)</label>
+            <input type="file" name="file" id="restore-file" accept=".zip" required>
+            <p class="warning-text">
+                ⚠️ Текущие данные будут заменены данными из бэкапа.
+                Перед восстановлением автоматически создаётся страховочная копия
+                (auto-backup-latest.zip в папке data).
+            </p>
+        </div>
+        <div class="btn-row">
+            <button type="submit" class="secondary">📤 Восстановить</button>
+        </div>
+    </form>
+</div>
+
+<div class="section">
+    <h2>📋 Журнал обновлений</h2>
+    {% if log_rows %}
+    <table class="log-table">
+        <thead>
+            <tr>
+                <th>Время</th>
+                <th>Название</th>
+                <th>Поле</th>
+                <th>Было</th>
+                <th>Стало</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in log_rows %}
+            <tr>
+                <td>{{ r.created_at }}</td>
+                <td>{{ r.title }}</td>
+                <td><span class="field-name">{{ r.field }}</span></td>
+                <td class="old">{{ r.old_value or '—' }}</td>
+                <td class="new">{{ r.new_value or '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty">Журнал пуст. Изменения появятся после первого обновления карточек.</p>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function confirmRestore() {
+        return confirm("ВНИМАНИЕ: Текущие данные будут заменены данными из бэкапа.\n\nПеред восстановлением будет создана страховочная копия (auto-backup-latest.zip).\n\nПродолжить?");
+    }
+</script>
+{% endblock %}
