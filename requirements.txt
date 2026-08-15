@@ -5,3 +5,4 @@ httpx
 apscheduler
 python-multipart
 cryptography
+beautifulsoup4

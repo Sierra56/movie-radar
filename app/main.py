@@ -23,6 +23,9 @@ from fastapi.templating import Jinja2Templates
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from rutracker import (RuTrackerClient, RuTrackerError,
+                       RuTrackerCaptchaError, RuTrackerAuthError)
+
 OMDB_KEY = os.getenv("OMDB_API_KEY", "")
 TMDB_KEY = os.getenv("TMDB_API_KEY", "")
 DB_PATH = os.getenv("DB_PATH", "/data/catalog.db")
@@ -46,13 +49,11 @@ CARD_TABLES = ["titles", "seasons", "episodes", "watched_episodes", "updates_log
 TORRENT_TABLES = ["tracker_credentials", "transmission_settings",
                   "distributions", "download_history", "distribution_patterns"]
 
-# Encryption key for sensitive data (tracker passwords, cookies)
 ENCRYPTION_KEY_PATH = os.path.join(os.path.dirname(DB_PATH), "encryption.key")
 
 
-# ── Encryption ────────────────────────────────────────
+# ── Encryption ───────────────────────────────────────
 def get_encryption_key() -> bytes:
-    """Load or generate the Fernet encryption key."""
     if os.path.exists(ENCRYPTION_KEY_PATH):
         with open(ENCRYPTION_KEY_PATH, "rb") as f:
             return f.read()
@@ -478,7 +479,6 @@ def ensure_schema():
             PRIMARY KEY (title_external_id, season_number, episode_number)
          )""", write=True)
 
-    # ── Torrent integration tables (Stage 1) ──
     db("""CREATE TABLE IF NOT EXISTS tracker_credentials (
             tracker_name TEXT PRIMARY KEY,
             username TEXT DEFAULT '',
@@ -521,10 +521,16 @@ def ensure_schema():
             last_files_json TEXT,
             last_episode_detected TEXT,
             next_episode_air_date TEXT,
+            new_files_count INTEGER DEFAULT 0,
             error_message TEXT,
             error_count INTEGER DEFAULT 0,
             added_at TEXT DEFAULT (datetime('now'))
          )""", write=True)
+    try:
+        db("ALTER TABLE distributions ADD COLUMN new_files_count INTEGER DEFAULT 0",
+           write=True)
+    except sqlite3.OperationalError:
+        pass
 
     db("""CREATE TABLE IF NOT EXISTS download_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -625,7 +631,7 @@ def log_update(external_id: str, title: str, field: str,
        (external_id, title, field, old_value, new_value), write=True)
 
 
-# ── Helpers ───────────────────────────────────────────
+# ── Helpers ──────────────────────────────────────────
 def human_date(iso: str | None) -> str | None:
     if not iso:
         return None
@@ -671,21 +677,19 @@ def progress_percent(watched: int, total: int) -> int:
 
 
 def parse_torrent_id(url: str) -> str | None:
-    """Extract torrent ID from rutracker URL."""
     url = url.strip()
     if "viewtopic.php" in url:
         parsed = urlparse(url)
         for pair in parsed.query.split("&"):
             if pair.startswith("t="):
                 return pair[2:]
-    # Fallback: try to find digits at the end
     import re
     m = re.search(r"t=(\d+)", url)
     return m.group(1) if m else None
 
 
 # ── Seasons & episodes helpers ────────────────────────
-async def save_seasons(title_external_id: str, seasons: list[dict]) -> list[dict]:
+async def save_seasons(title_external_id: str, seasons: list) -> list:
     existing = db("SELECT season_number FROM seasons WHERE title_external_id=?",
                   (title_external_id,))
     existing_numbers = {r["season_number"] for r in existing}
@@ -712,7 +716,7 @@ async def save_seasons(title_external_id: str, seasons: list[dict]) -> list[dict
 
 
 async def save_episodes(title_external_id: str, season_number: int,
-                        episodes: list[dict]) -> list[dict]:
+                        episodes: list) -> list:
     rows = db("SELECT id FROM seasons WHERE title_external_id=? AND season_number=?",
               (title_external_id, season_number))
     if not rows:
@@ -813,7 +817,7 @@ def toggle_season_watched(title_external_id: str, season_number: int):
                    (title_external_id, season_number, n), write=True)
 
 
-def get_season_progress(title_external_id: str, season_number: int) -> tuple[int, int]:
+def get_season_progress(title_external_id: str, season_number: int) -> tuple:
     rows = db("""
         SELECT COUNT(e.id) as total,
                SUM(CASE WHEN w.title_external_id IS NOT NULL THEN 1 ELSE 0 END) as watched
@@ -830,7 +834,7 @@ def get_season_progress(title_external_id: str, season_number: int) -> tuple[int
     return (0, 0)
 
 
-def get_show_progress(title_external_id: str) -> tuple[int, int]:
+def get_show_progress(title_external_id: str) -> tuple:
     rows = db("""
         SELECT COUNT(e.id) as total,
                SUM(CASE WHEN w.title_external_id IS NOT NULL THEN 1 ELSE 0 END) as watched
@@ -870,7 +874,7 @@ async def send_telegram(text: str) -> bool:
         return False
 
 
-async def notify_date_changes(changes: list[dict], force: bool = False):
+async def notify_date_changes(changes: list, force: bool = False):
     s = get_telegram_settings()
     if not force and (not s or not s.get("enabled") or not s.get("notify_date_changes")):
         return
@@ -897,7 +901,7 @@ async def notify_date_changes(changes: list[dict], force: bool = False):
                 if delta > 0:
                     direction = f"⬇️ на {delta} {plural(delta, ('день', 'дня', 'дней'))} позже"
                 elif delta < 0:
-                    direction = f"⬆️ на {abs(delta)} {plural(abs(delta), ('день', 'дня', 'дней'))} раньше"
+                    direction = f"⬆️ на {abs(delta)} {plural(abs.delta, ('день', 'дня', 'дней'))} раньше"
             except ValueError:
                 pass
         elif not c["old_date"] and c["new_date"]:
@@ -916,8 +920,8 @@ async def notify_date_changes(changes: list[dict], force: bool = False):
     print(f"[telegram] Date change notification sent ({len(changes)} titles)")
 
 
-async def notify_new_card(title: str, release_date: str | None,
-                          source: str, card_type: str | None, force: bool = False):
+async def notify_new_card(title: str, release_date, source: str,
+                          card_type, force: bool = False):
     s = get_telegram_settings()
     if not force and (not s or not s.get("enabled") or not s.get("notify_new_cards")):
         return
@@ -940,7 +944,7 @@ async def notify_new_card(title: str, release_date: str | None,
 
 
 async def notify_new_season(show_title: str, season_number: int,
-                            release_date: str | None, force: bool = False):
+                            release_date, force: bool = False):
     s = get_telegram_settings()
     if not force and (not s or not s.get("enabled") or not s.get("notify_new_seasons")):
         return
@@ -961,7 +965,7 @@ async def notify_new_season(show_title: str, season_number: int,
     print(f"[telegram] New season notification: {show_title} S{season_number}")
 
 
-async def notify_new_episodes(show_title: str, new_eps: list[dict], force: bool = False):
+async def notify_new_episodes(show_title: str, new_eps: list, force: bool = False):
     s = get_telegram_settings()
     if not force and (not s or not s.get("enabled") or not s.get("notify_new_episodes")):
         return
@@ -1337,13 +1341,13 @@ async def on_shutdown():
 
 
 # ── iCalendar export ──────────────────────────────────
-def escape_ics(s: str | None) -> str:
+def escape_ics(s):
     if not s:
         return ""
     return s.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
 
 
-def build_ics(cards: list[dict]) -> str:
+def build_ics(cards: list) -> str:
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -1420,7 +1424,6 @@ def _build_backup_zip(include_settings: bool, include_cards: bool,
             zf.writestr("meta.json", json.dumps(meta, ensure_ascii=False, indent=2))
             zf.write(tmp_db_path, "backup.db")
 
-            # Note: encryption.key and .torrent files are NEVER included
             if include_images and os.path.isdir(POSTERS_DIR):
                 for root, _, files in os.walk(POSTERS_DIR):
                     for fn in files:
@@ -1623,7 +1626,111 @@ async def img_proxy(url: str):
         return Response(status_code=502)
 
 
-# ── Routes ────────────────────────────────────────────
+# ── Stage 2: rutracker check ──────────────────────────
+async def check_distribution_now(title_external_id: str) -> tuple:
+    """Manually check a distribution. Returns (ok, message)."""
+    dist = get_distribution(title_external_id)
+    if not dist:
+        return False, "Раздача не найдена"
+
+    creds = get_tracker_credentials(dist["tracker_name"])
+    if not creds or not creds.get("username"):
+        return False, "Не настроены учётные данные трекера"
+
+    client = RuTrackerClient(
+        creds["username"],
+        decrypt_value(creds["encrypted_password"]),
+        get_proxy_url())
+
+    try:
+        cookies = await client.login()
+    except RuTrackerCaptchaError:
+        db("""UPDATE tracker_credentials SET last_error='captcha',
+              error_count=error_count+1 WHERE tracker_name=?""",
+           (dist["tracker_name"],), write=True)
+        return False, "Трекер требует капчу — войдите вручную в браузере и попробуйте позже"
+    except RuTrackerAuthError as e:
+        db("""UPDATE tracker_credentials SET last_error=?, error_count=error_count+1
+              WHERE tracker_name=?""", (str(e), dist["tracker_name"]), write=True)
+        return False, str(e)
+
+    db("""UPDATE tracker_credentials SET encrypted_cookies=?, last_login_at=datetime('now'),
+          last_error=NULL, error_count=0 WHERE tracker_name=?""",
+       (encrypt_value(json.dumps(cookies)), dist["tracker_name"]), write=True)
+
+    try:
+        files = await client.fetch_files(dist["torrent_id"], cookies)
+    except RuTrackerError as e:
+        db("UPDATE distributions SET status='error', error_message=? WHERE id=?",
+           (str(e), dist["id"]), write=True)
+        return False, str(e)
+
+    if not files:
+        db("""UPDATE distributions SET status='error',
+              error_message='Не удалось распарсить список файлов (debug-дамп сохранён)'
+              WHERE id=?""", (dist["id"],), write=True)
+        return False, "Не удалось распарсить список файлов. Debug-дамп: /data/debug_last_topic.html"
+
+    snapshot = sorted([(f["name"], f["size"]) for f in files])
+    new_hash = hashlib.md5(json.dumps(snapshot, ensure_ascii=False).encode()).hexdigest()
+    old_hash = dist["last_files_hash"]
+
+    new_count = 0
+    if old_hash and old_hash != new_hash:
+        try:
+            old_files = json.loads(dist["last_files_json"] or "[]")
+        except json.JSONDecodeError:
+            old_files = []
+        old_names = {f[0] for f in old_files}
+        new_count = len([f for f in snapshot if f[0] not in old_names])
+
+    status = "has_new" if new_count else "idle"
+    db("""UPDATE distributions SET last_checked_at=datetime('now'), last_files_hash=?,
+          last_files_json=?, status=?, new_files_count=?, error_count=0, error_message=NULL
+          WHERE id=?""",
+       (new_hash, json.dumps(snapshot, ensure_ascii=False), status, new_count,
+        dist["id"]), write=True)
+
+    if not old_hash:
+        return True, f"Первая проверка: найдено {len(files)} файлов, снапшот сохранён"
+    if new_count:
+        return True, f"Обнаружено новых файлов: {new_count}"
+    return True, "Изменений нет"
+
+
+@app.post("/distribution/check/{title_external_id}")
+async def check_distribution(title_external_id: str, sort: str = "date"):
+    ok, message = await check_distribution_now(title_external_id)
+    msg_param = "dist-checked" if ok else "dist-check-fail"
+    # Store last check message in settings for display
+    set_setting("last_dist_check", message)
+    return RedirectResponse(f"/?sort={sort}&msg={msg_param}", status_code=303)
+
+
+@app.post("/settings/tracker/test")
+async def test_tracker_login():
+    creds = get_tracker_credentials("rutracker")
+    if not creds or not creds.get("username"):
+        return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
+    client = RuTrackerClient(
+        creds["username"],
+        decrypt_value(creds["encrypted_password"]),
+        get_proxy_url())
+    try:
+        await client.login()
+        db("""UPDATE tracker_credentials SET last_login_at=datetime('now'),
+              last_error=NULL, error_count=0 WHERE tracker_name='rutracker'""",
+           write=True)
+        return RedirectResponse("/settings?msg=tracker-test-ok", status_code=303)
+    except RuTrackerCaptchaError:
+        return RedirectResponse("/settings?msg=tracker-captcha", status_code=303)
+    except RuTrackerError as e:
+        db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name='rutracker'",
+           (str(e),), write=True)
+        return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
+
+
+# ── Routes ───────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request, sort: str = "date",
                 err: str | None = None, msg: str | None = None):
@@ -1674,10 +1781,10 @@ async def index(request: Request, sort: str = "date",
 
         c["display_poster"] = ensure_proxied(c.get("display_poster"))
 
-        # Torrent distribution status
         dist = get_distribution(c["external_id"])
         c["has_distribution"] = dist is not None
         c["distribution_status"] = dist["status"] if dist else None
+        c["new_count"] = dist["new_files_count"] if dist else 0
 
         cards.append(c)
 
@@ -1686,10 +1793,12 @@ async def index(request: Request, sort: str = "date",
         "card-updated": "Карточка обновлена.",
         "dist-added": "Раздача добавлена.",
         "dist-removed": "Раздача удалена.",
+        "dist-checked": get_setting("last_dist_check") or "Проверка выполнена.",
     }
     error_messages = {
         "dist-exists": "Раздача уже добавлена к этой карточке.",
         "dist-invalid-url": "Неверная ссылка на раздачу.",
+        "dist-check-fail": get_setting("last_dist_check") or "Ошибка проверки раздачи.",
     }
 
     return templates.TemplateResponse(
@@ -1828,6 +1937,7 @@ async def settings_page(request: Request, msg: str | None = None):
         "restore-ok": "Восстановление завершено. Данные заменены из бэкапа.",
         "transmission-saved": "Настройки Transmission сохранены.",
         "tracker-saved": "Настройки трекера сохранены.",
+        "tracker-test-ok": "Вход на трекер выполнен успешно!",
     }
     error_messages = {
         "proxy-fail": "Не удалось подключиться через прокси. Проверьте URL.",
@@ -1836,6 +1946,8 @@ async def settings_page(request: Request, msg: str | None = None):
         "backup-empty": "Выберите хотя бы один компонент для бэкапа.",
         "restore-invalid": "Неверный файл бэкапа. Ожидается архив movie-radar.",
         "restore-error": "Ошибка при восстановлении. Подробности в логах контейнера.",
+        "tracker-test-fail": "Не удалось войти на трекер. Проверьте логин/пароль.",
+        "tracker-captcha": "Трекер требует капчу. Войдите вручную в браузере и попробуйте позже.",
     }
 
     return templates.TemplateResponse(
@@ -1953,7 +2065,6 @@ async def telegram_test(test_type: str):
     return RedirectResponse(f"/settings?msg={msg}", status_code=303)
 
 
-# ── Transmission & Tracker settings (Stage 1) ─────────
 @app.post("/settings/transmission")
 async def save_transmission(host: str = Form("localhost"),
                             port: int = Form(9091),
@@ -1994,7 +2105,6 @@ async def save_tracker(tracker_name: str = Form("rutracker"),
     return RedirectResponse("/settings?msg=tracker-saved", status_code=303)
 
 
-# ── Distribution routes (Stage 1) ─────────────────────
 @app.post("/distribution/add")
 async def add_distribution(title_external_id: str = Form(...),
                            url: str = Form(...),

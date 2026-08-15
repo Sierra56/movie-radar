@@ -239,7 +239,6 @@
         border: 1px dashed var(--accent);
     }
 
-    /* Distribution row (below notify checkbox) */
     .dist-row {
         display: flex;
         align-items: center;
@@ -300,6 +299,7 @@
     .dist-text {
         font-size: 12px;
         color: var(--text-muted);
+        flex: 1;
     }
 
     .dist-row.clickable .dist-text {
@@ -324,6 +324,23 @@
         margin-left: 4px;
     }
 
+    .btn-check {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        border: 0;
+        cursor: pointer;
+        background: var(--bg-hover);
+        color: var(--text);
+        font-size: 13px;
+        flex-shrink: 0;
+    }
+
+    .btn-check:hover {
+        background: var(--accent);
+        color: #fff;
+    }
+
     @keyframes pulse {
 
         0%,
@@ -336,7 +353,6 @@
         }
     }
 
-    /* Distribution modal */
     .modal-overlay {
         display: none;
         position: fixed;
@@ -477,7 +493,6 @@
         <div class="no-poster">нет постера</div>
         {% endif %}
 
-        {# Top-right actions: refresh + delete #}
         <div class="card-actions">
             {% if c.source != 'local' %}
             <form method="post" action="/refresh/{{ c.external_id }}?sort={{ sort }}">
@@ -516,7 +531,6 @@
                 </label>
             </form>
 
-            {# Distribution row (below notify checkbox) #}
             {% if c.has_distribution %}
             <div class="dist-row" title="Раздача: {{ c.distribution_status }}">
                 <button class="btn-dist {{ c.distribution_status }}">🎬</button>
@@ -528,6 +542,9 @@
                     {% elif c.distribution_status == 'dead' %}неактивна
                     {% else %}отслеживается{% endif %}
                 </span>
+                <form method="post" action="/distribution/check/{{ c.external_id }}?sort={{ sort }}">
+                    <button class="btn-check" title="Проверить раздачу сейчас">⟳</button>
+                </form>
             </div>
             {% else %}
             <div class="dist-row clickable" onclick="openDistModal('{{ c.external_id }}', '{{ c.title|e }}')">
@@ -542,7 +559,6 @@
     {% endfor %}
 </div>
 
-{# Distribution add modal #}
 <div class="modal-overlay" id="dist-modal">
     <div class="modal">
         <div class="modal-header">
