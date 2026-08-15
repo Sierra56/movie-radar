@@ -21,11 +21,17 @@
         color: var(--text-muted);
     }
 
+    .section h4 {
+        font-size: 14px;
+        margin: 12px 0 8px;
+        color: var(--text-muted);
+    }
+
     .field {
         display: flex;
         flex-direction: column;
         margin-bottom: 14px;
-        max-width: 500px;
+        max-width: 600px;
     }
 
     .field label {
@@ -37,6 +43,12 @@
     .field input,
     .field select {
         width: 100%;
+    }
+
+    .field textarea {
+        width: 100%;
+        font-family: monospace;
+        font-size: 12px;
     }
 
     .field .hint {
@@ -146,6 +158,64 @@
 
     .status-line.err {
         color: var(--error);
+    }
+
+    .warning-box {
+        background: var(--warning-bg);
+        padding: 12px 16px;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        border-left: 4px solid var(--warning-text);
+    }
+
+    .warning-box p {
+        margin: 0;
+        font-size: 13px;
+        color: var(--warning-text);
+    }
+
+    .warning-box strong {
+        color: var(--warning-text);
+    }
+
+    .info-box {
+        background: var(--bg-card);
+        padding: 12px 16px;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        border-left: 4px solid var(--accent);
+        font-size: 13px;
+        color: var(--text-muted);
+    }
+
+    .info-box strong {
+        color: var(--text);
+    }
+
+    .info-box ol {
+        margin: 8px 0 0 20px;
+        padding: 0;
+    }
+
+    .info-box ol li {
+        margin-bottom: 4px;
+    }
+
+    .info-box code {
+        background: var(--code-bg);
+        padding: 1px 5px;
+        border-radius: 4px;
+        font-size: 12px;
+    }
+
+    .cookies-loaded-badge {
+        display: inline-block;
+        background: var(--success);
+        color: #fff;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        margin-left: 8px;
     }
 </style>
 {% endblock %}
@@ -387,6 +457,12 @@
 
 <div class="section">
     <h2>🌍 Торрент-трекер: rutracker.org</h2>
+
+    <div class="warning-box">
+        <p><strong>⚠️ Cloudflare защита.</strong> Rutracker использует Cloudflare для защиты от ботов,
+            поэтому автоматический вход по логину/паролю обычно не работает. Используйте ручной ввод cookies.</p>
+    </div>
+
     <form method="post" action="/settings/tracker">
         <input type="hidden" name="tracker_name" value="rutracker">
 
@@ -394,8 +470,49 @@
             <input type="checkbox" name="enabled" id="tracker-enabled" {% if tracker and tracker.get('enabled')
                 %}checked{% endif %}>
             <label for="tracker-enabled">Включить отслеживание раздач</label>
+            {% if tracker_has_cookies %}
+            <span class="cookies-loaded-badge">✅ Cookies загружены</span>
+            {% endif %}
         </div>
 
+        <h3>Способ 1: Ручной ввод cookies (рекомендуется)</h3>
+        <div class="field">
+            <label>Cookies из браузера</label>
+            <textarea name="cookies_manual" rows="4"
+                placeholder="bb_data=abc123...; bb_session=def456...; bb_ssl=ghi789..."></textarea>
+            <p class="hint">
+                Вставьте cookies в формате <code>name1=value1; name2=value2; name3=value3</code>.
+                После сохранения они будут зашифрованы и сохранены в БД.
+            </p>
+        </div>
+
+        <div class="info-box">
+            <strong>Как получить cookies:</strong>
+            <ol>
+                <li>Откройте <strong>rutracker.org</strong> в Chrome или Firefox и войдите в свой аккаунт</li>
+                <li>Нажмите <strong>F12</strong> (откроется DevTools)</li>
+                <li>Перейдите на вкладку <strong>Application</strong> (Chrome) или <strong>Storage</strong> (Firefox)
+                </li>
+                <li>Слева найдите <strong>Cookies</strong> → <code>https://rutracker.org</code></li>
+                <li>Скопируйте значения cookies <code>bb_data</code> и <code>bb_session</code> (и <code>bb_ssl</code>,
+                    если есть)</li>
+                <li>Вставьте в формате: <code>bb_data=значение1; bb_session=значение2</code></li>
+            </ol>
+            <p style="margin-top:8px;">
+                <strong>Альтернатива:</strong> расширение <code>EditThisCookie</code> или <code>Cookie-Editor</code>
+                позволяет экспортировать все cookies одной строкой.
+            </p>
+            <p style="margin-top:8px;">
+                <strong>Срок действия:</strong> cookies rutracker обычно живут несколько месяцев.
+                Если начнут появляться ошибки 403 — обновите cookies по этой инструкции.
+            </p>
+        </div>
+
+        <h3>Способ 2: Логин/пароль (fallback)</h3>
+        <p class="hint" style="margin-bottom:10px;">
+            Используется как резервный способ — если cookies истекли, система попытается войти через логин/пароль.
+            Обычно блокируется Cloudflare.
+        </p>
         <div class="two-col">
             <div class="field">
                 <label>Логин</label>
@@ -404,7 +521,7 @@
             <div class="field">
                 <label>Пароль</label>
                 <input type="password" name="password" placeholder="••••••••">
-                <p class="hint">Пароль хранится в зашифрованном виде и используется только для входа.</p>
+                <p class="hint">Пароль хранится в зашифрованном виде.</p>
             </div>
         </div>
 
@@ -412,17 +529,17 @@
         <p class="status-line err">Последняя ошибка: {{ tracker['last_error'] }}</p>
         {% endif %}
         {% if tracker and tracker.get('last_login_at') %}
-        <p class="status-line ok">Последний вход: {{ tracker['last_login_at'] }}</p>
+        <p class="status-line ok">Последний успешный доступ: {{ tracker['last_login_at'] }}</p>
         {% endif %}
 
         <p class="warning-text">
-            ⚠️ Автоматизация может нарушать правила трекера и привести к бану аккаунта.
-            Рекомендуется использовать отдельный аккаунт и умеренные интервалы проверки.
+            ⚠️ Автоматизация может нарушать правила трекера. Рекомендуется использовать отдельный аккаунт.
         </p>
 
         <div class="btn-row">
             <button type="submit">Сохранить</button>
-            <button type="submit" formaction="/settings/tracker/test" class="secondary">🔑 Проверить вход</button>
+            <button type="submit" formaction="/settings/tracker/test" class="secondary">🔑 Проверить
+                подключение</button>
         </div>
     </form>
 </div>
