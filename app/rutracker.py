@@ -1,13 +1,12 @@
 import re
 import os
-import json
 import httpx
 from bs4 import BeautifulSoup
 
 LOGIN_URL = "https://rutracker.org/forum/login.php"
+INDEX_URL = "https://rutracker.org/forum/index.php"
 TOPIC_URL = "https://rutracker.org/forum/viewtopic.php"
 
-# Путь для отладочного дампа страницы, если парсинг не удался
 DB_PATH = os.getenv("DB_PATH", "/data/catalog.db")
 DEBUG_DUMP_PATH = os.path.join(os.path.dirname(DB_PATH), "debug_last_topic.html")
 
@@ -17,6 +16,15 @@ SIZE_UNITS = {
 }
 
 _SIZE_RE = re.compile(r"([\d.,]+)\s*(Б|КБ|МБ|ГБ|ТБ|B|KB|MB|GB|TB)", re.I)
+
+_BROWSER_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                   "Chrome/126.0.0.0 Safari/537.36"),
+    "Accept": ("text/html,application/xhtml+xml,application/xml;"
+               "q=0.9,image/avif,image/webp,*/*;q=0.8"),
+    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+}
 
 
 class RuTrackerError(Exception):
@@ -80,6 +88,7 @@ def save_debug_dump(html: str):
         os.makedirs(os.path.dirname(DEBUG_DUMP_PATH), exist_ok=True)
         with open(DEBUG_DUMP_PATH, "w", encoding="utf-8") as f:
             f.write(html)
+        print(f"[rutracker] Debug dump saved to {DEBUG_DUMP_PATH}")
     except Exception as e:
         print(f"[rutracker] Failed to save debug dump: {e}")
 
@@ -93,41 +102,66 @@ class RuTrackerClient:
     def _client(self, cookies: dict | None = None) -> httpx.AsyncClient:
         kwargs = {"timeout": 25, "follow_redirects": True}
         if self.proxy:
-            kwargs["proxy"] = self.proxy
+            kwargs["proxy"] = proxy
         client = httpx.AsyncClient(**kwargs)
         if cookies:
             client.cookies = dict(cookies)
         return client
 
     async def login(self) -> dict:
-        """Login and return cookies dict. Raises on captcha / auth failure."""
-        async with self._client() as client:
-            r = await client.post(
-                LOGIN_URL,
-                data={
-                    "login_username": self.username,
-                    "login_password": self.password,
-                    "login": "Вход",
-                },
-                headers={"Referer": "https://rutracker.org/forum/index.php"},
-            )
-            low = r.text.lower()
-            if "капча" in low or "captcha" in low:
-                raise RuTrackerCaptchaError("Rutracker требует капчу")
-            session = client.cookies.get("bb_session")
-            if not session:
-                raise RuTrackerAuthError("Не удалось войти: проверьте логин и пароль")
-            return dict(client.cookies)
+        """Login and return cookies dict. Raises on captcha / auth / network failure."""
+        try:
+            async with self._client() as client:
+                # Предварительный GET главной — получаем базовые cookies
+                await client.get(INDEX_URL, headers=_BROWSER_HEADERS)
+
+                r = await client.post(
+                    LOGIN_URL,
+                    data={
+                        "login_username": self.username,
+                        "login_password": self.password,
+                        "login": "Вход",
+                    },
+                    headers={
+                        **_BROWSER_HEADERS,
+                        "Referer": INDEX_URL,
+                        "Origin": "https://rutracker.org",
+                        "Content-Type": "application/x-www-form-urlencoded",
+                    },
+                )
+                print(f"[rutracker] Login status={r.status_code} final_url={r.url}")
+
+                low = r.text.lower()
+                if "капча" in low or "captcha" in low:
+                    save_debug_dump(r.text)
+                    raise RuTrackerCaptchaError("Rutracker требует капчу")
+
+                session = client.cookies.get("bb_session")
+                if not session:
+                    save_debug_dump(r.text)
+                    raise RuTrackerAuthError(
+                        "Не удалось войти: нет cookie bb_session "
+                        "(проверьте логин/пароль, дамп сохранён)")
+
+                print(f"[rutracker] Login OK, cookies: {list(client.cookies.keys())}")
+                return dict(client.cookies)
+        except httpx.HTTPError as e:
+            # Сетевые ошибки (таймаут, прокси недоступен, DNS) -> RuTrackerError
+            raise RuTrackerError(f"Сетевая ошибка при входе: {e}")
 
     async def fetch_files(self, torrent_id: str, cookies: dict | None = None) -> list:
         """Fetch topic page and parse file list. Returns [] if parse fails
         (a debug dump is saved in that case)."""
-        async with self._client(cookies) as client:
-            r = await client.get(TOPIC_URL, params={"t": torrent_id})
-            if r.status_code == 404:
-                raise RuTrackerError("Раздача не найдена (404)")
-            r.raise_for_status()
-            files = parse_files(r.text)
-            if not files:
-                save_debug_dump(r.text)
-            return files
+        try:
+            async with self._client(cookies) as client:
+                r = await client.get(TOPIC_URL, params={"t": torrent_id},
+                                     headers=_BROWSER_HEADERS)
+                if r.status_code == 404:
+                    raise RuTrackerError("Раздача не найдена (404)")
+                r.raise_for_status()
+                files = parse_files(r.text)
+                if not files:
+                    save_debug_dump(r.text)
+                return files
+        except httpx.HTTPError as e:
+            raise RuTrackerError(f"Сетевая ошибка при получении раздачи: {e}")
