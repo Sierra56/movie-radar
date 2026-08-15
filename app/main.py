@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import quote, urlparse
 
 import httpx
+from cryptography.fernet import Fernet
 from fastapi import FastAPI, Form, Request, Response, BackgroundTasks, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -39,9 +40,47 @@ MONTHS_RU = ["января", "февраля", "марта", "апреля", "м
 
 refresh_progress = {"running": False, "done": 0, "total": 0}
 
-BACKUP_VERSION = "1.0.0"
+BACKUP_VERSION = "1.0.1"
 SETTINGS_TABLES = ["settings", "telegram_settings"]
 CARD_TABLES = ["titles", "seasons", "episodes", "watched_episodes", "updates_log"]
+TORRENT_TABLES = ["tracker_credentials", "transmission_settings",
+                  "distributions", "download_history", "distribution_patterns"]
+
+# Encryption key for sensitive data (tracker passwords, cookies)
+ENCRYPTION_KEY_PATH = os.path.join(os.path.dirname(DB_PATH), "encryption.key")
+
+
+# ── Encryption ────────────────────────────────────────
+def get_encryption_key() -> bytes:
+    """Load or generate the Fernet encryption key."""
+    if os.path.exists(ENCRYPTION_KEY_PATH):
+        with open(ENCRYPTION_KEY_PATH, "rb") as f:
+            return f.read()
+    key = Fernet.generate_key()
+    os.makedirs(os.path.dirname(ENCRYPTION_KEY_PATH), exist_ok=True)
+    with open(ENCRYPTION_KEY_PATH, "wb") as f:
+        f.write(key)
+    os.chmod(ENCRYPTION_KEY_PATH, 0o600)
+    return key
+
+
+def encrypt_value(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        return Fernet(get_encryption_key()).encrypt(value.encode()).decode()
+    except Exception as e:
+        print(f"[encrypt] Error: {e}")
+        return ""
+
+
+def decrypt_value(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        return Fernet(get_encryption_key()).decrypt(value.encode()).decode()
+    except Exception:
+        return ""
 
 
 # ── Image helpers ─────────────────────────────────────
@@ -439,6 +478,74 @@ def ensure_schema():
             PRIMARY KEY (title_external_id, season_number, episode_number)
          )""", write=True)
 
+    # ── Torrent integration tables (Stage 1) ──
+    db("""CREATE TABLE IF NOT EXISTS tracker_credentials (
+            tracker_name TEXT PRIMARY KEY,
+            username TEXT DEFAULT '',
+            encrypted_password TEXT DEFAULT '',
+            encrypted_cookies TEXT DEFAULT '',
+            cookies_expires_at TEXT,
+            enabled INTEGER DEFAULT 1,
+            last_login_at TEXT,
+            last_error TEXT,
+            error_count INTEGER DEFAULT 0
+         )""", write=True)
+
+    db("""CREATE TABLE IF NOT EXISTS transmission_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            host TEXT DEFAULT 'localhost',
+            port INTEGER DEFAULT 9091,
+            username TEXT DEFAULT '',
+            encrypted_password TEXT DEFAULT '',
+            enabled INTEGER DEFAULT 0,
+            base_download_dir TEXT DEFAULT '',
+            action_on_new TEXT DEFAULT 'download',
+            filter_recent_only INTEGER DEFAULT 1,
+            min_file_size_mb INTEGER DEFAULT 500,
+            default_check_interval INTEGER DEFAULT 6
+         )""", write=True)
+    db("INSERT OR IGNORE INTO transmission_settings (id) VALUES (1)", write=True)
+
+    db("""CREATE TABLE IF NOT EXISTS distributions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title_external_id TEXT UNIQUE,
+            tracker_name TEXT DEFAULT 'rutracker',
+            torrent_id TEXT,
+            url TEXT,
+            download_path TEXT,
+            mode TEXT DEFAULT 'smart',
+            check_interval_hours INTEGER DEFAULT 6,
+            status TEXT DEFAULT 'idle',
+            last_checked_at TEXT,
+            last_files_hash TEXT,
+            last_files_json TEXT,
+            last_episode_detected TEXT,
+            next_episode_air_date TEXT,
+            error_message TEXT,
+            error_count INTEGER DEFAULT 0,
+            added_at TEXT DEFAULT (datetime('now'))
+         )""", write=True)
+
+    db("""CREATE TABLE IF NOT EXISTS download_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            distribution_id INTEGER,
+            file_name TEXT,
+            file_size INTEGER,
+            transmission_hash TEXT,
+            sent_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (distribution_id) REFERENCES distributions(id) ON DELETE CASCADE
+         )""", write=True)
+
+    db("""CREATE TABLE IF NOT EXISTS distribution_patterns (
+            distribution_id INTEGER PRIMARY KEY,
+            samples_json TEXT DEFAULT '[]',
+            median_delay_hours INTEGER,
+            samples_count INTEGER DEFAULT 0,
+            confidence TEXT DEFAULT 'low',
+            last_updated_at TEXT,
+            FOREIGN KEY (distribution_id) REFERENCES distributions(id) ON DELETE CASCADE
+         )""", write=True)
+
 
 ensure_schema()
 
@@ -490,6 +597,21 @@ def save_telegram_settings(bot_token: str, chat_id: str, enabled: bool,
         1 if notify_new_cards else 0, 1 if notify_new_seasons else 0,
         1 if notify_new_episodes else 0),
        write=True)
+
+
+def get_transmission_settings() -> dict:
+    rows = db("SELECT * FROM transmission_settings WHERE id=1")
+    return dict(rows[0]) if rows else {}
+
+
+def get_tracker_credentials(tracker_name: str) -> dict | None:
+    rows = db("SELECT * FROM tracker_credentials WHERE tracker_name=?", (tracker_name,))
+    return dict(rows[0]) if rows else None
+
+
+def get_distribution(title_external_id: str) -> dict | None:
+    rows = db("SELECT * FROM distributions WHERE title_external_id=?", (title_external_id,))
+    return dict(rows[0]) if rows else None
 
 
 templates.env.globals["get_theme"] = get_theme
@@ -546,6 +668,20 @@ def is_today(iso_date: str | None) -> bool:
 
 def progress_percent(watched: int, total: int) -> int:
     return round(watched / total * 100) if total > 0 else 0
+
+
+def parse_torrent_id(url: str) -> str | None:
+    """Extract torrent ID from rutracker URL."""
+    url = url.strip()
+    if "viewtopic.php" in url:
+        parsed = urlparse(url)
+        for pair in parsed.query.split("&"):
+            if pair.startswith("t="):
+                return pair[2:]
+    # Fallback: try to find digits at the end
+    import re
+    m = re.search(r"t=(\d+)", url)
+    return m.group(1) if m else None
 
 
 # ── Seasons & episodes helpers ────────────────────────
@@ -1249,7 +1385,7 @@ def build_ics(cards: list[dict]) -> str:
 
 # ── Backup / Restore ──────────────────────────────────
 def _build_backup_zip(include_settings: bool, include_cards: bool,
-                      include_images: bool) -> io.BytesIO:
+                      include_images: bool, include_torrents: bool) -> io.BytesIO:
     tmp_db_fd, tmp_db_path = tempfile.mkstemp(suffix=".db")
     os.close(tmp_db_fd)
     try:
@@ -1264,6 +1400,9 @@ def _build_backup_zip(include_settings: bool, include_cards: bool,
         if not include_cards:
             for t in CARD_TABLES:
                 dst_conn.execute(f"DROP TABLE IF EXISTS {t}")
+        if not include_torrents:
+            for t in TORRENT_TABLES:
+                dst_conn.execute(f"DROP TABLE IF EXISTS {t}")
         dst_conn.commit()
         dst_conn.close()
 
@@ -1276,10 +1415,12 @@ def _build_backup_zip(include_settings: bool, include_cards: bool,
                 "include_settings": include_settings,
                 "include_cards": include_cards,
                 "include_images": include_images,
+                "include_torrents": include_torrents,
             }
             zf.writestr("meta.json", json.dumps(meta, ensure_ascii=False, indent=2))
             zf.write(tmp_db_path, "backup.db")
 
+            # Note: encryption.key and .torrent files are NEVER included
             if include_images and os.path.isdir(POSTERS_DIR):
                 for root, _, files in os.walk(POSTERS_DIR):
                     for fn in files:
@@ -1298,15 +1439,17 @@ def _build_backup_zip(include_settings: bool, include_cards: bool,
 @app.post("/backup/create")
 async def create_backup(include_settings: str = Form("off"),
                         include_cards: str = Form("off"),
-                        include_images: str = Form("off")):
+                        include_images: str = Form("off"),
+                        include_torrents: str = Form("off")):
     inc_settings = include_settings == "on"
     inc_cards = include_cards == "on"
     inc_images = include_images == "on"
+    inc_torrents = include_torrents == "on"
 
-    if not (inc_settings or inc_cards or inc_images):
+    if not (inc_settings or inc_cards or inc_images or inc_torrents):
         return RedirectResponse("/settings?msg=backup-empty", status_code=303)
 
-    buffer = _build_backup_zip(inc_settings, inc_cards, inc_images)
+    buffer = _build_backup_zip(inc_settings, inc_cards, inc_images, inc_torrents)
     filename = f"movie-radar-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.zip"
     return StreamingResponse(
         buffer,
@@ -1338,9 +1481,8 @@ async def restore_backup(file: UploadFile = File(...)):
     tmp_path = None
     scheduler.pause()
     try:
-        # Auto-backup current state before overwriting
         try:
-            auto_buffer = _build_backup_zip(True, True, True)
+            auto_buffer = _build_backup_zip(True, True, True, True)
             auto_path = os.path.join(os.path.dirname(DB_PATH), "auto-backup-latest.zip")
             with open(auto_path, "wb") as f:
                 f.write(auto_buffer.read())
@@ -1348,7 +1490,6 @@ async def restore_backup(file: UploadFile = File(...)):
         except Exception as e:
             print(f"[backup] Auto-backup failed (continuing): {e}")
 
-        # Extract backup.db to a temp file
         tmp_fd, tmp_path = tempfile.mkstemp(suffix=".db")
         os.close(tmp_fd)
         with zf.open("backup.db") as src, open(tmp_path, "wb") as dst:
@@ -1356,6 +1497,7 @@ async def restore_backup(file: UploadFile = File(...)):
 
         include_settings = meta.get("include_settings", False)
         include_cards = meta.get("include_cards", False)
+        include_torrents = meta.get("include_torrents", False)
 
         conn = sqlite3.connect(DB_PATH)
         try:
@@ -1367,6 +1509,8 @@ async def restore_backup(file: UploadFile = File(...)):
                 tables_to_restore.extend(SETTINGS_TABLES)
             if include_cards:
                 tables_to_restore.extend(CARD_TABLES)
+            if include_torrents:
+                tables_to_restore.extend(TORRENT_TABLES)
 
             has_seq_table = conn.execute(
                 "SELECT name FROM backup.sqlite_master "
@@ -1395,7 +1539,6 @@ async def restore_backup(file: UploadFile = File(...)):
                             "INSERT INTO main.sqlite_sequence (name, seq) VALUES (?,?)",
                             (table, max_id))
 
-            # Commit BEFORE detach to release locks on the attached database
             conn.commit()
             conn.execute("DETACH DATABASE backup")
             conn.execute("PRAGMA foreign_keys=ON")
@@ -1403,7 +1546,6 @@ async def restore_backup(file: UploadFile = File(...)):
         finally:
             conn.close()
 
-        # Restore images
         if meta.get("include_images", False):
             os.makedirs(POSTERS_DIR, exist_ok=True)
             for name in names:
@@ -1414,7 +1556,6 @@ async def restore_backup(file: UploadFile = File(...)):
                     with zf.open(name) as src, open(target, "wb") as dst:
                         dst.write(src.read())
 
-        # Re-apply restored settings
         try:
             scheduler.reschedule_job("refresh", trigger="interval",
                                      hours=get_refresh_hours())
@@ -1532,11 +1673,23 @@ async def index(request: Request, sort: str = "date",
             c["display_poster"] = c["poster_url"]
 
         c["display_poster"] = ensure_proxied(c.get("display_poster"))
+
+        # Torrent distribution status
+        dist = get_distribution(c["external_id"])
+        c["has_distribution"] = dist is not None
+        c["distribution_status"] = dist["status"] if dist else None
+
         cards.append(c)
 
     success_messages = {
         "refresh-started": "Обновление запущено в фоне.",
         "card-updated": "Карточка обновлена.",
+        "dist-added": "Раздача добавлена.",
+        "dist-removed": "Раздача удалена.",
+    }
+    error_messages = {
+        "dist-exists": "Раздача уже добавлена к этой карточке.",
+        "dist-invalid-url": "Неверная ссылка на раздачу.",
     }
 
     return templates.TemplateResponse(
@@ -1544,7 +1697,7 @@ async def index(request: Request, sort: str = "date",
             "cards": cards, "sort": sort,
             "error": "Ничего не нашлось — уточните название." if err else None,
             "message": success_messages.get(msg),
-            "error_message": None,
+            "error_message": error_messages.get(msg),
         })
 
 
@@ -1662,6 +1815,8 @@ async def settings_page(request: Request, msg: str | None = None):
     log_rows = db("SELECT * FROM updates_log ORDER BY created_at DESC LIMIT 200")
     proxy_url = get_setting("proxy_url", "") or ""
     theme = get_setting("theme", "dark")
+    trans = get_transmission_settings()
+    tracker = get_tracker_credentials("rutracker")
 
     success_messages = {
         "refresh-saved": "Период обновления сохранён.",
@@ -1671,6 +1826,8 @@ async def settings_page(request: Request, msg: str | None = None):
         "theme-saved": "Тема сохранена.",
         "test-ok": "Тестовое сообщение отправлено!",
         "restore-ok": "Восстановление завершено. Данные заменены из бэкапа.",
+        "transmission-saved": "Настройки Transmission сохранены.",
+        "tracker-saved": "Настройки трекера сохранены.",
     }
     error_messages = {
         "proxy-fail": "Не удалось подключиться через прокси. Проверьте URL.",
@@ -1689,6 +1846,8 @@ async def settings_page(request: Request, msg: str | None = None):
             "log_rows": [dict(r) for r in log_rows],
             "proxy_url": proxy_url,
             "theme": theme,
+            "trans": trans,
+            "tracker": tracker,
             "message": success_messages.get(msg),
             "error_message": error_messages.get(msg),
         })
@@ -1794,6 +1953,82 @@ async def telegram_test(test_type: str):
     return RedirectResponse(f"/settings?msg={msg}", status_code=303)
 
 
+# ── Transmission & Tracker settings (Stage 1) ─────────
+@app.post("/settings/transmission")
+async def save_transmission(host: str = Form("localhost"),
+                            port: int = Form(9091),
+                            username: str = Form(""),
+                            password: str = Form(""),
+                            enabled: str = Form("off"),
+                            base_download_dir: str = Form(""),
+                            action_on_new: str = Form("download"),
+                            filter_recent_only: str = Form("off"),
+                            min_file_size_mb: int = Form(500),
+                            default_check_interval: int = Form(6)):
+    if action_on_new not in ("download", "pause", "notify_only"):
+        action_on_new = "download"
+    db("""UPDATE transmission_settings SET
+            host=?, port=?, username=?, encrypted_password=?, enabled=?,
+            base_download_dir=?, action_on_new=?, filter_recent_only=?,
+            min_file_size_mb=?, default_check_interval=?
+          WHERE id=1""",
+       (host.strip(), port, username.strip(), encrypt_value(password.strip()),
+        1 if enabled == "on" else 0, base_download_dir.strip(), action_on_new,
+        1 if filter_recent_only == "on" else 0,
+        max(1, min_file_size_mb), max(1, min(168, default_check_interval))),
+       write=True)
+    return RedirectResponse("/settings?msg=transmission-saved", status_code=303)
+
+
+@app.post("/settings/tracker")
+async def save_tracker(tracker_name: str = Form("rutracker"),
+                       username: str = Form(""),
+                       password: str = Form(""),
+                       enabled: str = Form("off")):
+    db("""INSERT OR REPLACE INTO tracker_credentials
+          (tracker_name, username, encrypted_password, enabled)
+          VALUES (?,?,?,?)""",
+       (tracker_name, username.strip(), encrypt_value(password.strip()),
+        1 if enabled == "on" else 0),
+       write=True)
+    return RedirectResponse("/settings?msg=tracker-saved", status_code=303)
+
+
+# ── Distribution routes (Stage 1) ─────────────────────
+@app.post("/distribution/add")
+async def add_distribution(title_external_id: str = Form(...),
+                           url: str = Form(...),
+                           download_path: str = Form(""),
+                           mode: str = Form("smart"),
+                           check_interval_hours: int = Form(6)):
+    existing = get_distribution(title_external_id)
+    if existing:
+        return RedirectResponse("/?msg=dist-exists", status_code=303)
+
+    torrent_id = parse_torrent_id(url)
+    if not torrent_id:
+        return RedirectResponse("/?msg=dist-invalid-url", status_code=303)
+
+    if mode not in ("smart", "fixed"):
+        mode = "smart"
+
+    db("""INSERT INTO distributions
+          (title_external_id, tracker_name, torrent_id, url, download_path,
+           mode, check_interval_hours, status)
+          VALUES (?, 'rutracker', ?, ?, ?, ?, ?, 'idle')""",
+       (title_external_id, torrent_id, url.strip(), download_path.strip(),
+        mode, max(1, min(168, check_interval_hours))),
+       write=True)
+    return RedirectResponse("/?msg=dist-added", status_code=303)
+
+
+@app.post("/distribution/remove/{title_external_id}")
+async def remove_distribution(title_external_id: str, sort: str = "date"):
+    db("DELETE FROM distributions WHERE title_external_id=?",
+       (title_external_id,), write=True)
+    return RedirectResponse(f"/?sort={sort}&msg=dist-removed", status_code=303)
+
+
 @app.get("/export.ics")
 async def export_ics():
     rows = db("SELECT * FROM titles")
@@ -1811,6 +2046,7 @@ async def delete(external_id: str, sort: str = "date"):
     db("DELETE FROM titles WHERE external_id = ?", (external_id,), write=True)
     db("DELETE FROM seasons WHERE title_external_id = ?", (external_id,), write=True)
     db("DELETE FROM watched_episodes WHERE title_external_id = ?", (external_id,), write=True)
+    db("DELETE FROM distributions WHERE title_external_id = ?", (external_id,), write=True)
     return RedirectResponse(f"/?sort={sort}", status_code=303)
 
 
