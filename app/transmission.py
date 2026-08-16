@@ -1,5 +1,7 @@
 import os
 import json
+import tempfile
+import base64
 from typing import Optional
 from transmission_rpc import Client, TransmissionError
 
@@ -43,40 +45,60 @@ class TransmissionClient:
 
     def add_torrent(self, torrent_data: bytes, download_dir: str = None,
                     paused: bool = False) -> dict:
-        """Добавляет торрент в Transmission.
+        """Добавляет торрент в Transmission через временный файл.
         
         Args:
-            torrent_data: содержимое .torrent файла
+            torrent_data: содержимое .torrent файла (bytes)
             download_dir: путь для скачивания (None = использовать дефолт)
             paused: добавить на паузу
         
         Returns:
             dict с информацией о торренте
         """
+        tmp_path = None
         try:
             client = self.connect()
             
-            # transmission-rpc принимает либо путь к файлу, либо magnet, либо base64
-            # Для bytes используем base64
-            import base64
-            torrent_b64 = base64.b64encode(torrent_data).decode('utf-8')
+            # Сохраняем во временный файл
+            with tempfile.NamedTemporaryFile(mode='wb', suffix='.torrent', delete=False) as tmp:
+                tmp.write(torrent_data)
+                tmp_path = tmp.name
             
+            print(f"[transmission] Saved torrent to temp file: {tmp_path}")
+            
+            # Передаём путь к файлу
             torrent = client.add_torrent(
-                torrent_b64,
+                torrent=tmp_path,
                 download_dir=download_dir,
                 paused=paused
             )
             
-            return {
+            result = {
                 'hash': torrent.hashString,
                 'name': torrent.name,
                 'size': torrent.total_size,
                 'status': 'added'
             }
+            
+            print(f"[transmission] Added torrent: {result['name']} ({result['hash']})")
+            return result
+            
         except TransmissionError as e:
-            raise Exception(f"Ошибка добавления торрента: {e}")
+            error_msg = str(e)
+            print(f"[transmission] TransmissionError: {error_msg}")
+            raise Exception(f"Ошибка добавления торрента: {error_msg}")
         except Exception as e:
-            raise Exception(f"Не удалось добавить торрент: {e}")
+            error_msg = str(e)
+            print(f"[transmission] Unexpected error: {error_msg}")
+            raise Exception(f"Не удалось добавить торрент: {error_msg}")
+        finally:
+            # Удаляем временный файл
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                    print(f"[transmission] Removed temp file: {tmp_path}")
+                except Exception as e:
+                    print(f"[transmission] Failed to remove temp file: {e}")
 
     def get_torrent_status(self, torrent_hash: str) -> Optional[dict]:
         """Получает статус торрента по хэшу.
