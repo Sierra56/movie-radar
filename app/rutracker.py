@@ -17,7 +17,8 @@ SIZE_UNITS = {
 
 _SIZE_RE = re.compile(r"([\d.,]+)\s*(Б|КБ|МБ|ГБ|ТБ|B|KB|MB|GB|TB)", re.I)
 
-# Дефолтные браузерные заголовки (User-Agent может быть переопределён)
+# Дефолтные браузерные заголовки (User-Agent может быть переопределён).
+# ВАЖНО: не задаём Accept-Encoding вручную — httpx сам выставит корректный.
 _DEFAULT_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                "AppleWebKit/537.36 (KHTML, like Gecko) "
                "Chrome/126.0.0.0 Safari/537.36")
@@ -26,7 +27,6 @@ _BASE_HEADERS = {
     "Accept": ("text/html,application/xhtml+xml,application/xml;"
                "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"),
     "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Accept-Encoding": "gzip, deflate, br",
     "sec-ch-ua": '"Chromium";v="126", "Google Chrome";v="126", "Not-A.Brand";v="8"',
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"Windows"',
@@ -162,42 +162,64 @@ class RuTrackerClient:
             client.cookies = dict(effective_cookies)
         return client
 
-    async def validate_cookies(self, cookies: dict) -> bool:
-        """Проверяет валидность cookies без попытки логина."""
+    async def validate_cookies(self, cookies: dict) -> tuple:
+        """Проверяет валидность cookies. Возвращает (ok, reason)."""
         if not cookies:
-            return False
+            return False, "cookies не заданы"
         print(f"[rutracker] Validating cookies: keys={list(cookies.keys())}")
-        print(f"[rutracker] Using User-Agent: {self.user_agent[:60]}...")
+        print(f"[rutracker] User-Agent: {self.user_agent[:80]}")
         try:
             async with self._client(cookies) as client:
                 r = await client.get(INDEX_URL, headers=self._headers())
-                print(f"[rutracker]   index status={r.status_code}")
+                print(f"[rutracker]   index status={r.status_code}, len={len(r.text)}")
 
                 if r.status_code == 403:
-                    print("[rutracker]   403 Forbidden (Cloudflare)")
                     save_debug_dump(r.text)
-                    return False
+                    return False, ("403 Forbidden: Cloudflare отклонил запрос. "
+                                   "Проверьте: 1) User-Agent в точности как в браузере; "
+                                   "2) браузер ходит через тот же прокси, что и приложение.")
 
                 low = r.text.lower()
-                if "just a moment" in low or ("cloudflare" in low and "challenge" in low):
-                    print("[rutracker]   Cloudflare challenge detected")
+                if "just a moment" in low or "cf_chl" in low:
                     save_debug_dump(r.text)
-                    return False
+                    return False, ("Cloudflare challenge (Just a moment). "
+                                   "Обновите cf_clearance и User-Agent из браузера.")
 
                 soup = BeautifulSoup(r.text, "html.parser")
+                title_tag = soup.find("title")
+                print(f"[rutracker]   page title: "
+                      f"{title_tag.get_text(strip=True) if title_tag else '-'}")
+
+                # Точный маркер гостя: на странице видна форма логина
+                has_login_form = ("login_username" in low) or ("login_password" in low)
+                # Маркеры залогиненного пользователя
                 logout_indicators = ["logout", "выйти", "выход"]
                 has_logout = any(ind in low for ind in logout_indicators)
                 username_in_page = self.username.lower() in low if self.username else False
 
-                if has_logout or username_in_page:
-                    print(f"[rutracker]   Cookies valid (logout={has_logout}, username_in_page={username_in_page})")
-                    return True
+                print(f"[rutracker]   has_login_form={has_login_form}, "
+                      f"has_logout={has_logout}, username_in_page={username_in_page}")
 
-                print("[rutracker]   Cookies appear invalid (no logout indicator found)")
-                return False
+                if has_logout or username_in_page:
+                    print("[rutracker]   Cookies valid")
+                    return True, "ok"
+
+                if has_login_form:
+                    save_debug_dump(r.text)
+                    return False, ("Страница открылась как ГОСТЬ (видна форма входа). "
+                                   "Проверьте: 1) cookies скопированы одной строкой БЕЗ опечаток — "
+                                   "F12 → Network → клик по запросу → Request Headers → "
+                                   "правой кнопкой по значению cookie → Copy value; "
+                                   "2) заполнено поле User-Agent — в точности как в вашем браузере "
+                                   "(там же, значение user-agent).")
+
+                save_debug_dump(r.text)
+                return False, ("Не удалось определить статус сессии "
+                               "(нет ни формы входа, ни маркеров логина). "
+                               "Debug-дамп: /data/debug_last_topic.html")
         except httpx.HTTPError as e:
             print(f"[rutracker]   Network error: {e}")
-            return False
+            return False, f"сетевая ошибка: {e}"
 
     async def login(self) -> dict:
         """Вход через логин/пароль. Используется как fallback."""
