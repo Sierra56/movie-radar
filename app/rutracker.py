@@ -15,23 +15,11 @@ SIZE_UNITS = {
     "Б": 1, "КБ": 1024, "МБ": 1024 ** 2, "ГБ": 1024 ** 3, "ТБ": 1024 ** 4,
 }
 
-_SIZE_RE = re.compile(r"([\d.,]+)\s*(Б|КБ|МБ|ГБ|ТБ|B|KB|MB|GB|TB)", re.I)
-
-# Дефолтные браузерные заголовки (User-Agent может быть переопределён).
-# ВАЖНО: не задаём Accept-Encoding вручную — httpx сам выставит корректный.
-_DEFAULT_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-               "AppleWebKit/537.36 (KHTML, like Gecko) "
-               "Chrome/126.0.0.0 Safari/537.36")
-
-_BASE_HEADERS = {
-    "Accept": ("text/html,application/xhtml+xml,application/xml;"
-               "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"),
-    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-    "sec-ch-ua": '"Chromium";v="126", "Google Chrome";v="126", "Not-A.Brand";v="8"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"Windows"',
-    "Upgrade-Insecure-Requests": "1",
-}
+# Более строгая регулярка: обязательно начинается с цифры,
+# дробная часть (точка или запятая) опциональна.
+# Матчит: "1.46 ГБ", "700 МБ", "1,5 ГБ", "12.34 KB"
+# НЕ матчит: ".", ",", "..." (голые разделители)
+_SIZE_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(Б|КБ|МБ|ГБ|ТБ|B|KB|MB|GB|TB)", re.I)
 
 
 class RuTrackerError(Exception):
@@ -54,9 +42,13 @@ def parse_size(text: str) -> int:
     m = _SIZE_RE.search(text or "")
     if not m:
         return 0
-    num = float(m.group(1).replace(",", "."))
-    unit = m.group(2).upper()
-    return int(num * SIZE_UNITS.get(unit, 1))
+    try:
+        num = float(m.group(1).replace(",", "."))
+        unit = m.group(2).upper()
+        return int(num * SIZE_UNITS.get(unit, 1))
+    except (ValueError, OverflowError) as e:
+        print(f"[rutracker] parse_size failed for {text!r}: {e}")
+        return 0
 
 
 def parse_files(html: str) -> list:
@@ -84,8 +76,10 @@ def parse_files(html: str) -> list:
             size_text = cells[-1].get_text(strip=True)
             if _SIZE_RE.search(size_text):
                 name = cells[-2].get_text(" ", strip=True)
-                if name:
-                    files.append({"name": name, "size": parse_size(size_text)})
+                size = parse_size(size_text)
+                # Пропускаем строки где имя пустое или размер 0 (вероятно шапка таблицы)
+                if name and size > 0:
+                    files.append({"name": name, "size": size})
     return files
 
 
@@ -134,11 +128,23 @@ class RuTrackerClient:
         self.password = password
         self.proxy = proxy
         self.initial_cookies = cookies or {}
-        # User-Agent должен совпадать с тем, что был при получении cf_clearance
-        self.user_agent = (user_agent or "").strip() or _DEFAULT_UA
+        self.user_agent = (user_agent or "").strip() or (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/126.0.0.0 Safari/537.36"
+        )
 
     def _headers(self, extra: dict | None = None) -> dict:
-        h = {**_BASE_HEADERS, "User-Agent": self.user_agent}
+        h = {
+            "User-Agent": self.user_agent,
+            "Accept": ("text/html,application/xhtml+xml,application/xml;"
+                       "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"),
+            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+            "sec-ch-ua": '"Chromium";v="126", "Google Chrome";v="126", "Not-A.Brand";v="8"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            "Upgrade-Insecure-Requests": "1",
+        }
         if extra:
             h.update(extra)
         return h
@@ -190,9 +196,7 @@ class RuTrackerClient:
                 print(f"[rutracker]   page title: "
                       f"{title_tag.get_text(strip=True) if title_tag else '-'}")
 
-                # Точный маркер гостя: на странице видна форма логина
                 has_login_form = ("login_username" in low) or ("login_password" in low)
-                # Маркеры залогиненного пользователя
                 logout_indicators = ["logout", "выйти", "выход"]
                 has_logout = any(ind in low for ind in logout_indicators)
                 username_in_page = self.username.lower() in low if self.username else False
@@ -222,7 +226,6 @@ class RuTrackerClient:
             return False, f"сетевая ошибка: {e}"
 
     async def login(self) -> dict:
-        """Вход через логин/пароль. Используется как fallback."""
         if not self.username or not self.password:
             raise RuTrackerAuthError("Логин и пароль не указаны")
 
