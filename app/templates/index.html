@@ -324,21 +324,34 @@
         margin-left: 4px;
     }
 
-    .btn-check {
+    .btn-check,
+    .btn-download {
         width: 24px;
         height: 24px;
         border-radius: 50%;
         border: 0;
         cursor: pointer;
-        background: var(--bg-hover);
-        color: var(--text);
         font-size: 13px;
         flex-shrink: 0;
+        color: #fff;
+    }
+
+    .btn-check {
+        background: var(--bg-hover);
+        color: var(--text);
     }
 
     .btn-check:hover {
         background: var(--accent);
         color: #fff;
+    }
+
+    .btn-download {
+        background: var(--accent);
+    }
+
+    .btn-download:hover {
+        filter: brightness(1.15);
     }
 
     @keyframes pulse {
@@ -542,8 +555,13 @@
                     {% elif c.distribution_status == 'dead' %}неактивна
                     {% else %}отслеживается{% endif %}
                 </span>
-                <form method="post" action="/distribution/check/{{ c.external_id }}?sort={{ sort }}">
+                <form method="post" action="/distribution/check/{{ c.external_id }}?sort={{ sort }}"
+                    onclick="event.stopPropagation()">
                     <button class="btn-check" title="Проверить раздачу сейчас">⟳</button>
+                </form>
+                <form method="post" action="/distribution/download/{{ c.external_id }}?sort={{ sort }}"
+                    onclick="event.stopPropagation()" onsubmit="return confirmDownload('{{ c.title|e }}')">
+                    <button class="btn-download" title="Скачать в Transmission">📥</button>
                 </form>
             </div>
             {% else %}
@@ -630,6 +648,10 @@
 
     function closeDistModal() {
         document.getElementById('dist-modal').classList.remove('open');
+    }
+
+    function confirmDownload(titleName) {
+        return confirm(`Отправить раздачу «${titleName}» в Transmission?\n\nСкачивание начнётся сразу (согласно настройкам Transmission).`);
     }
 
     document.getElementById('dist-modal').addEventListener('click', function (e) {

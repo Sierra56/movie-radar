@@ -325,3 +325,44 @@ class RuTrackerClient:
                 return files
         except httpx.HTTPError as e:
             raise RuTrackerError(f"Сетевая ошибка при получении раздачи: {e}")
+        
+    async def download_torrent(self, torrent_id: str, cookies: dict = None) -> bytes:
+        """Скачивает .torrent файл с rutracker.
+        
+        Returns:
+            bytes содержимое .torrent файла
+        
+        Raises:
+            RuTrackerError если не удалось скачать
+        """
+        # URL для скачивания .torrent на rutracker
+        download_url = "https://rutracker.org/forum/dl.php"
+        
+        try:
+            effective_cookies = cookies or self.initial_cookies
+            async with self._client(effective_cookies) as client:
+                r = await client.get(
+                    download_url,
+                    params={"t": torrent_id},
+                    headers=self._headers({"Referer": TOPIC_URL})
+                )
+                
+                if r.status_code == 404:
+                    raise RuTrackerError("Торрент-файл не найден (404)")
+                if r.status_code == 403:
+                    raise RuTrackerForbiddenError(
+                        "Доступ к торрент-файлу запрещён (403). Обновите cookies.")
+                
+                r.raise_for_status()
+                
+                # Проверка что получили именно торрент-файл
+                content_type = r.headers.get('content-type', '')
+                if 'bittorrent' not in content_type and not r.content.startswith(b'd8:'):
+                    save_debug_dump(r.text)
+                    raise RuTrackerError(
+                        f"Получен не торрент-файл (content-type: {content_type})")
+                
+                return r.content
+                
+        except httpx.HTTPError as e:
+            raise RuTrackerError(f"Сетевая ошибка при скачивании торрента: {e}")

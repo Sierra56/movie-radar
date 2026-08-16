@@ -26,6 +26,7 @@ from apscheduler.triggers.cron import CronTrigger
 from .rutracker import (RuTrackerClient, RuTrackerError,
                         RuTrackerCaptchaError, RuTrackerAuthError,
                         RuTrackerForbiddenError)
+from .transmission import TransmissionClient
 
 OMDB_KEY = os.getenv("OMDB_API_KEY", "")
 TMDB_KEY = os.getenv("TMDB_API_KEY", "")
@@ -427,11 +428,14 @@ def ensure_schema():
             notify_new_cards INTEGER DEFAULT 1,
             notify_new_seasons INTEGER DEFAULT 1,
             notify_new_episodes INTEGER DEFAULT 1,
+            notify_torrent_started INTEGER DEFAULT 1,
+            notify_torrent_completed INTEGER DEFAULT 1,
             last_sent TEXT
          )""", write=True)
     db("INSERT OR IGNORE INTO telegram_settings (id) VALUES (1)", write=True)
     for col in ("notify_date_changes", "notify_new_cards",
-                "notify_new_seasons", "notify_new_episodes"):
+                "notify_new_seasons", "notify_new_episodes",
+                "notify_torrent_started", "notify_torrent_completed"):
         try:
             db(f"ALTER TABLE telegram_settings ADD COLUMN {col} INTEGER DEFAULT 1",
                write=True)
@@ -509,9 +513,18 @@ def ensure_schema():
             action_on_new TEXT DEFAULT 'download',
             filter_recent_only INTEGER DEFAULT 1,
             min_file_size_mb INTEGER DEFAULT 500,
-            default_check_interval INTEGER DEFAULT 6
+            default_check_interval INTEGER DEFAULT 6,
+            default_download_behavior TEXT DEFAULT 'use_distribution_path',
+            auto_download_new_files INTEGER DEFAULT 0
          )""", write=True)
     db("INSERT OR IGNORE INTO transmission_settings (id) VALUES (1)", write=True)
+    # Миграция: добавляем новые колонки если их нет
+    for col in ("default_download_behavior TEXT DEFAULT 'use_distribution_path'",
+                "auto_download_new_files INTEGER DEFAULT 0"):
+        try:
+            db(f"ALTER TABLE transmission_settings ADD COLUMN {col}", write=True)
+        except sqlite3.OperationalError:
+            pass
 
     db("""CREATE TABLE IF NOT EXISTS distributions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -599,16 +612,21 @@ def get_telegram_settings() -> dict:
 def save_telegram_settings(bot_token: str, chat_id: str, enabled: bool,
                            send_time: str, notify_days: int,
                            notify_date_changes: bool, notify_new_cards: bool,
-                           notify_new_seasons: bool, notify_new_episodes: bool):
+                           notify_new_seasons: bool, notify_new_episodes: bool,
+                           notify_torrent_started: bool = False,
+                           notify_torrent_completed: bool = False):
     db("""UPDATE telegram_settings SET
             bot_token=?, chat_id=?, enabled=?, send_time=?,
             notify_days=?, notify_date_changes=?, notify_new_cards=?,
-            notify_new_seasons=?, notify_new_episodes=?
+            notify_new_seasons=?, notify_new_episodes=?,
+            notify_torrent_started=?, notify_torrent_completed=?
           WHERE id=1""",
        (bot_token, chat_id, 1 if enabled else 0, send_time,
         notify_days, 1 if notify_date_changes else 0,
         1 if notify_new_cards else 0, 1 if notify_new_seasons else 0,
-        1 if notify_new_episodes else 0),
+        1 if notify_new_episodes else 0,
+        1 if notify_torrent_started else 0,
+        1 if notify_torrent_completed else 0),
        write=True)
 
 
@@ -643,7 +661,6 @@ def load_tracker_cookies(tracker_name: str) -> dict | None:
 
 def build_tracker_client(tracker_name: str = "rutracker",
                          cookies: dict | None = None) -> RuTrackerClient:
-    """Собирает клиент трекера с учётом сохранённых cookies и UA."""
     creds = get_tracker_credentials(tracker_name) or {}
     username = creds.get("username", "")
     password = decrypt_value(creds.get("encrypted_password", "")) if creds.get("encrypted_password") else ""
@@ -655,6 +672,18 @@ def build_tracker_client(tracker_name: str = "rutracker",
         proxy=get_proxy_url(),
         cookies=effective_cookies,
         user_agent=user_agent)
+
+
+def build_transmission_client() -> TransmissionClient:
+    """Собирает клиент Transmission из настроек."""
+    trans = get_transmission_settings() or {}
+    password = decrypt_value(trans.get("encrypted_password", "")) if trans.get("encrypted_password") else ""
+    return TransmissionClient(
+        host=trans.get("host", "localhost"),
+        port=trans.get("port", 9091),
+        username=trans.get("username", ""),
+        password=password
+    )
 
 
 templates.env.globals["get_theme"] = get_theme
@@ -723,6 +752,15 @@ def parse_torrent_id(url: str) -> str | None:
     import re
     m = re.search(r"t=(\d+)", url)
     return m.group(1) if m else None
+
+
+def format_size(size_bytes: int) -> str:
+    if not size_bytes:
+        return "?"
+    size_mb = size_bytes / (1024 * 1024)
+    if size_mb > 1024:
+        return f"{size_mb / 1024:.2f} ГБ"
+    return f"{size_mb:.1f} МБ"
 
 
 # ── Seasons & episodes helpers ────────────────────────
@@ -1045,6 +1083,48 @@ async def notify_new_episodes(show_title: str, new_eps: list, force: bool = Fals
 
     await send_telegram("\n".join(lines))
     print(f"[telegram] New episodes notification: {show_title} ({len(sorted_eps)} eps)")
+
+
+async def notify_torrent_started(title: str, torrent_name: str,
+                                 download_dir: str = None, force: bool = False):
+    s = get_telegram_settings()
+    if not force and (not s or not s.get("enabled") or not s.get("notify_torrent_started")):
+        return
+    if not s or not s.get("bot_token") or not s.get("chat_id"):
+        return
+
+    lines = [
+        "📥 <b>Начато скачивание</b>",
+        "",
+        f"🎬 <b>{title}</b>",
+        f"📦 {torrent_name}",
+    ]
+    if download_dir:
+        lines.append(f"📂 {download_dir}")
+    lines.append("⏳ Загрузка запущена в Transmission")
+
+    await send_telegram("\n".join(lines))
+    print(f"[telegram] Torrent started notification: {title}")
+
+
+async def notify_torrent_completed(title: str, torrent_name: str,
+                                   size_bytes: int, force: bool = False):
+    s = get_telegram_settings()
+    if not force and (not s or not s.get("enabled") or not s.get("notify_torrent_completed")):
+        return
+    if not s or not s.get("bot_token") or not s.get("chat_id"):
+        return
+
+    lines = [
+        "✅ <b>Скачивание завершено</b>",
+        "",
+        f"🎬 <b>{title}</b>",
+        f"📦 {torrent_name}",
+        f"📏 {format_size(size_bytes)}",
+    ]
+
+    await send_telegram("\n".join(lines))
+    print(f"[telegram] Torrent completed notification: {title}")
 
 
 async def check_and_notify(force: bool = False):
@@ -1663,7 +1743,7 @@ async def img_proxy(url: str):
         return Response(status_code=502)
 
 
-# ── Stage 2: rutracker check ──────────────────────────
+# ── Stage 2-3: rutracker + Transmission ──────────────
 async def check_distribution_now(title_external_id: str) -> tuple:
     """Manually check a distribution. Returns (ok, message)."""
     dist = get_distribution(title_external_id)
@@ -1753,6 +1833,37 @@ async def check_distribution_now(title_external_id: str) -> tuple:
        (new_hash, json.dumps(snapshot, ensure_ascii=False), status, new_count,
         dist["id"]), write=True)
 
+    # Авто-скачивание при обнаружении новых файлов
+    if new_count > 0:
+        trans = get_transmission_settings()
+        if (trans and trans.get("enabled") and
+            trans.get("auto_download_new_files") and
+            trans.get("action_on_new") != "notify_only"):
+            try:
+                torrent_data = await client.download_torrent(dist["torrent_id"], cookies)
+                download_dir = _resolve_download_dir(dist, trans)
+                paused = (trans.get("action_on_new") == "pause")
+
+                trans_client = build_transmission_client()
+                result = trans_client.add_torrent(torrent_data, download_dir, paused)
+
+                new_status = "downloading" if not paused else "idle"
+                db("UPDATE distributions SET status=? WHERE id=?",
+                   (new_status, dist["id"]), write=True)
+                db("""INSERT INTO download_history
+                      (distribution_id, file_name, file_size, transmission_hash, sent_at)
+                      VALUES (?, ?, ?, ?, datetime('now'))""",
+                   (dist["id"], result["name"], result["size"], result["hash"]),
+                   write=True)
+
+                card_rows = db("SELECT title FROM titles WHERE external_id=?",
+                               (title_external_id,))
+                card_title = card_rows[0]["title"] if card_rows else title_external_id
+                await notify_torrent_started(card_title, result["name"], download_dir)
+                print(f"[dist-check] Auto-downloaded: {result['name']}")
+            except Exception as e:
+                print(f"[dist-check] Auto-download failed: {e}")
+
     if not old_hash:
         return True, f"Первая проверка: найдено {len(files)} файлов, снапшот сохранён"
     if new_count:
@@ -1760,12 +1871,23 @@ async def check_distribution_now(title_external_id: str) -> tuple:
     return True, "Изменений нет"
 
 
+def _resolve_download_dir(dist: dict, trans: dict) -> str | None:
+    """Определяет путь для скачивания на основе поведения из настроек."""
+    behavior = trans.get("default_download_behavior", "use_distribution_path")
+    if behavior == "use_distribution_path":
+        if dist.get("download_path"):
+            return dist["download_path"]
+        return trans.get("base_download_dir") or None
+    # use_base_dir
+    return trans.get("base_download_dir") or None
+
+
 @app.post("/distribution/check/{title_external_id}")
 async def check_distribution(title_external_id: str, sort: str = "date"):
     ok, message = await check_distribution_now(title_external_id)
     msg_param = "dist-checked" if ok else "dist-check-fail"
     set_setting("last_dist_check", message)
-    return RedirectResponse(f"/?sort={sort}&msg={msg_param}", status_code=303)
+    return RedirectResponse(f"/?sort={sort}&msg={msg_parameter}", status_code=303)
 
 
 @app.post("/settings/tracker/test")
@@ -1787,7 +1909,7 @@ async def test_tracker_login():
 
     if cookies:
         print("[tracker-test] Validating saved cookies")
-        is_valid = await client.validate_cookies(cookies)
+        is_valid, reason = await client.validate_cookies(cookies)
         if is_valid:
             db("""UPDATE tracker_credentials SET last_login_at=datetime('now'),
                   last_error=NULL, error_count=0 WHERE tracker_name='rutracker'""",
@@ -1795,10 +1917,10 @@ async def test_tracker_login():
             return RedirectResponse("/settings?msg=tracker-test-ok", status_code=303)
         else:
             if username and password:
-                print("[tracker-test] Cookies invalid, attempting login")
+                print(f"[tracker-test] Cookies invalid ({reason}), attempting login")
             else:
-                db("UPDATE tracker_credentials SET last_error='cookies_invalid' WHERE tracker_name='rutracker'",
-                   write=True)
+                db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name='rutracker'",
+                   (reason,), write=True)
                 return RedirectResponse("/settings?msg=tracker-cookies-invalid", status_code=303)
 
     try:
@@ -1830,7 +1952,91 @@ async def test_tracker_login():
         return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
 
 
-# ── Routes ───────────────────────────────────────────
+# ── Stage 3: Transmission download ──────────────────
+@app.post("/distribution/download/{title_external_id}")
+async def download_distribution(title_external_id: str, sort: str = "date"):
+    """Скачивает торрент в Transmission вручную."""
+    dist = get_distribution(title_external_id)
+    if not dist:
+        set_setting("last_dist_download", "Раздача не найдена")
+        return RedirectResponse(f"/?sort={sort}&msg=dist-download-fail", status_code=303)
+
+    trans = get_transmission_settings()
+    if not trans or not trans.get("enabled"):
+        set_setting("last_dist_download", "Transmission отключён в настройках")
+        return RedirectResponse(f"/?sort={sort}&msg=dist-download-fail", status_code=303)
+
+    creds = get_tracker_credentials(dist["tracker_name"])
+    if not creds or not creds.get("enabled"):
+        set_setting("last_dist_download", "Трекер отключён в настройках")
+        return RedirectResponse(f"/?sort={sort}&msg=dist-download-fail", status_code=303)
+
+    cookies = load_tracker_cookies(dist["tracker_name"])
+    if not cookies:
+        set_setting("last_dist_download", "Не найдены cookies трекера")
+        return RedirectResponse(f"/?sort={sort}&msg=dist-download-fail", status_code=303)
+
+    tracker_client = build_tracker_client(dist["tracker_name"], cookies=cookies)
+
+    try:
+        torrent_data = await tracker_client.download_torrent(dist["torrent_id"], cookies)
+
+        download_dir = _resolve_download_dir(dist, trans)
+        action = trans.get("action_on_new", "download")
+        paused = (action == "pause")
+
+        trans_client = build_transmission_client()
+        result = trans_client.add_torrent(torrent_data, download_dir, paused)
+
+        new_status = "downloading" if not paused else "idle"
+        db("UPDATE distributions SET status=?, error_count=0, error_message=NULL WHERE id=?",
+           (new_status, dist["id"]), write=True)
+
+        db("""INSERT INTO download_history
+              (distribution_id, file_name, file_size, transmission_hash, sent_at)
+              VALUES (?, ?, ?, ?, datetime('now'))""",
+           (dist["id"], result["name"], result["size"], result["hash"]),
+           write=True)
+
+        card_rows = db("SELECT title FROM titles WHERE external_id=?",
+                       (title_external_id,))
+        card_title = card_rows[0]["title"] if card_rows else title_external_id
+
+        await notify_torrent_started(card_title, result["name"], download_dir)
+
+        set_setting("last_dist_download",
+                    f"Отправлено в Transmission: {result['name']} ({format_size(result['size'])})")
+        return RedirectResponse(f"/?sort={sort}&msg=dist-downloaded", status_code=303)
+
+    except Exception as e:
+        print(f"[download] Error: {type(e).__name__}: {e}")
+        db("UPDATE distributions SET status='error', error_message=?, error_count=error_count+1 WHERE id=?",
+           (str(e), dist["id"]), write=True)
+        set_setting("last_dist_download", f"Ошибка: {e}")
+        return RedirectResponse(f"/?sort={sort}&msg=dist-download-fail", status_code=303)
+
+
+@app.post("/settings/transmission/test")
+async def test_transmission():
+    """Проверяет соединение с Transmission."""
+    trans = get_transmission_settings()
+    if not trans or not trans.get("host"):
+        return RedirectResponse("/settings?msg=transmission-test-fail", status_code=303)
+    try:
+        trans_client = build_transmission_client()
+        ok, message = trans_client.test_connection()
+        if ok:
+            return RedirectResponse("/settings?msg=transmission-test-ok", status_code=303)
+        else:
+            set_setting("last_trans_test", message)
+            return RedirectResponse("/settings?msg=transmission-test-fail", status_code=303)
+    except Exception as e:
+        print(f"[transmission-test] Error: {e}")
+        set_setting("last_trans_test", str(e))
+        return RedirectResponse("/settings?msg=transmission-test-fail", status_code=303)
+
+
+# ── Routes ────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request, sort: str = "date",
                 err: str | None = None, msg: str | None = None):
@@ -1894,11 +2100,13 @@ async def index(request: Request, sort: str = "date",
         "dist-added": "Раздача добавлена.",
         "dist-removed": "Раздача удалена.",
         "dist-checked": get_setting("last_dist_check") or "Проверка выполнена.",
+        "dist-downloaded": get_setting("last_dist_download") or "Торрент отправлен в Transmission.",
     }
     error_messages = {
         "dist-exists": "Раздача уже добавлена к этой карточке.",
         "dist-invalid-url": "Неверная ссылка на раздачу.",
         "dist-check-fail": get_setting("last_dist_check") or "Ошибка проверки раздачи.",
+        "dist-download-fail": get_setting("last_dist_download") or "Ошибка скачивания.",
     }
 
     return templates.TemplateResponse(
@@ -2040,6 +2248,7 @@ async def settings_page(request: Request, msg: str | None = None):
         "test-ok": "Тестовое сообщение отправлено!",
         "restore-ok": "Восстановление завершено. Данные заменены из бэкапа.",
         "transmission-saved": "Настройки Transmission сохранены.",
+        "transmission-test-ok": get_setting("last_trans_test") or "Transmission подключён.",
         "tracker-saved": "Настройки трекера сохранены.",
         "tracker-cookies-saved": "Cookies трекера сохранены и зашифрованы.",
         "tracker-test-ok": "Подключение к трекеру успешно!",
@@ -2051,6 +2260,7 @@ async def settings_page(request: Request, msg: str | None = None):
         "backup-empty": "Выберите хотя бы один компонент для бэкапа.",
         "restore-invalid": "Неверный файл бэкапа. Ожидается архив movie-radar.",
         "restore-error": "Ошибка при восстановлении. Подробности в логах контейнера.",
+        "transmission-test-fail": get_setting("last_trans_test") or "Не удалось подключиться к Transmission.",
         "tracker-test-fail": "Не удалось войти на трекер. Проверьте учётные данные.",
         "tracker-captcha": "Трекер требует капчу. Войдите вручную в браузере и обновите cookies.",
         "tracker-forbidden": "Rutracker заблокировал запрос (403). Обновите cookies из браузера.",
@@ -2122,13 +2332,17 @@ async def save_telegram(bot_token: str = Form(""),
                         notify_date_changes: str = Form("off"),
                         notify_new_cards: str = Form("off"),
                         notify_new_seasons: str = Form("off"),
-                        notify_new_episodes: str = Form("off")):
+                        notify_new_episodes: str = Form("off"),
+                        notify_torrent_started: str = Form("off"),
+                        notify_torrent_completed: str = Form("off")):
     save_telegram_settings(bot_token.strip(), chat_id.strip(),
                            enabled == "on", send_time, notify_days,
                            notify_date_changes == "on",
                            notify_new_cards == "on",
                            notify_new_seasons == "on",
-                           notify_new_episodes == "on")
+                           notify_new_episodes == "on",
+                           notify_torrent_started == "on",
+                           notify_torrent_completed == "on")
     schedule_telegram_job()
     return RedirectResponse("/settings?msg=telegram-saved", status_code=303)
 
@@ -2164,6 +2378,14 @@ async def telegram_test(test_type: str):
              "name": "Тестовый эпизод",
              "release_date": today.isoformat()},
         ], force=True)
+    elif test_type == "torrent-started":
+        await notify_torrent_started("Тестовый сериал",
+                                     "Тестовый.сериал.S01E01.1080p.mkv",
+                                     "/media/series", force=True)
+    elif test_type == "torrent-completed":
+        await notify_torrent_completed("Тестовый сериал",
+                                       "Тестовый.сериал.S01E01.1080p.mkv",
+                                       2 * 1024 * 1024 * 1024, force=True)
     elif test_type == "daily":
         await check_and_notify(force=True)
     else:
@@ -2183,18 +2405,26 @@ async def save_transmission(host: str = Form("localhost"),
                             action_on_new: str = Form("download"),
                             filter_recent_only: str = Form("off"),
                             min_file_size_mb: int = Form(500),
-                            default_check_interval: int = Form(6)):
+                            default_check_interval: int = Form(6),
+                            default_download_behavior: str = Form("use_distribution_path"),
+                            auto_download_new_files: str = Form("off")):
     if action_on_new not in ("download", "pause", "notify_only"):
         action_on_new = "download"
+    if default_download_behavior not in ("use_distribution_path", "use_base_dir"):
+        default_download_behavior = "use_distribution_path"
+
     db("""UPDATE transmission_settings SET
             host=?, port=?, username=?, encrypted_password=?, enabled=?,
             base_download_dir=?, action_on_new=?, filter_recent_only=?,
-            min_file_size_mb=?, default_check_interval=?
+            min_file_size_mb=?, default_check_interval=?,
+            default_download_behavior=?, auto_download_new_files=?
           WHERE id=1""",
        (host.strip(), port, username.strip(), encrypt_value(password.strip()),
         1 if enabled == "on" else 0, base_download_dir.strip(), action_on_new,
         1 if filter_recent_only == "on" else 0,
-        max(1, min_file_size_mb), max(1, min(168, default_check_interval))),
+        max(1, min_file_size_mb), max(1, min(168, default_check_interval)),
+        default_download_behavior,
+        1 if auto_download_new_files == "on" else 0),
        write=True)
     return RedirectResponse("/settings?msg=transmission-saved", status_code=303)
 
@@ -2235,22 +2465,21 @@ async def save_tracker(tracker_name: str = Form("rutracker"),
                 proxy=get_proxy_url(),
                 cookies=cookies_dict,
                 user_agent=ua_val)
-            is_valid = await client.validate_cookies(cookies_dict)
+            is_valid, reason = await client.validate_cookies(cookies_dict)
             if is_valid:
                 db("UPDATE tracker_credentials SET last_login_at=datetime('now'), last_error=NULL WHERE tracker_name=?",
                    (tracker_name,), write=True)
                 print(f"[tracker] Cookies saved and validated ({len(cookies_dict)} keys)")
                 return RedirectResponse("/settings?msg=tracker-cookies-saved", status_code=303)
             else:
-                db("UPDATE tracker_credentials SET last_error='cookies_invalid_on_save' WHERE tracker_name=?",
-                   (tracker_name,), write=True)
-                print(f"[tracker] Cookies saved but validation failed")
+                db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name=?",
+                   (reason,), write=True)
+                print(f"[tracker] Cookies saved but validation failed: {reason}")
                 return RedirectResponse("/settings?msg=tracker-cookies-invalid", status_code=303)
         except Exception as e:
             print(f"[tracker] Error parsing cookies: {e}")
             return RedirectResponse("/settings?msg=tracker-cookies-invalid", status_code=303)
 
-    # Сохраняем логин/пароль/UA, cookies не трогаем если уже есть
     existing = get_tracker_credentials(tracker_name)
     existing_cookies = existing.get("encrypted_cookies", "") if existing else ""
     db("""INSERT OR REPLACE INTO tracker_credentials
