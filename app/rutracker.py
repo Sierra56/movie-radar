@@ -326,7 +326,7 @@ class RuTrackerClient:
         except httpx.HTTPError as e:
             raise RuTrackerError(f"Сетевая ошибка при получении раздачи: {e}")
         
-    async def download_torrent(self, torrent_id: str, cookies: dict = None) -> bytes:
+        async def download_torrent(self, torrent_id: str, cookies: dict = None) -> bytes:
         """Скачивает .torrent файл с rutracker.
         
         Returns:
@@ -335,34 +335,77 @@ class RuTrackerClient:
         Raises:
             RuTrackerError если не удалось скачать
         """
-        # URL для скачивания .torrent на rutracker
         download_url = "https://rutracker.org/forum/dl.php"
         
         try:
             effective_cookies = cookies or self.initial_cookies
             async with self._client(effective_cookies) as client:
+                print(f"[rutracker] Downloading .torrent for t={torrent_id}")
+                
                 r = await client.get(
                     download_url,
                     params={"t": torrent_id},
-                    headers=self._headers({"Referer": TOPIC_URL})
+                    headers=self._headers({
+                        "Referer": f"{TOPIC_URL}?t={torrent_id}",
+                        "sec-fetch-dest": "document",
+                        "sec-fetch-mode": "navigate",
+                        "sec-fetch-site": "same-origin",
+                    })
                 )
+                
+                print(f"[rutracker]   dl.php status={r.status_code}, "
+                      f"content-type={r.headers.get('content-type', 'N/A')}, "
+                      f"len={len(r.content)}")
                 
                 if r.status_code == 404:
                     raise RuTrackerError("Торрент-файл не найден (404)")
                 if r.status_code == 403:
+                    save_debug_dump(r.text)
                     raise RuTrackerForbiddenError(
                         "Доступ к торрент-файлу запрещён (403). Обновите cookies.")
                 
                 r.raise_for_status()
                 
-                # Проверка что получили именно торрент-файл
-                content_type = r.headers.get('content-type', '')
-                if 'bittorrent' not in content_type and not r.content.startswith(b'd8:'):
-                    save_debug_dump(r.text)
-                    raise RuTrackerError(
-                        f"Получен не торрент-файл (content-type: {content_type})")
+                # Проверяем что получили именно торрент-файл
+                content_type = r.headers.get('content-type', '').lower()
                 
+                # Допустимые content-type для торрент-файла
+                is_torrent_content_type = (
+                    'bittorrent' in content_type or
+                    'application/x-bittorrent' in content_type or
+                    'application/octet-stream' in content_type
+                )
+                
+                # Торрент-файлы начинаются с 'd8:' (bencoded dictionary)
+                is_torrent_format = r.content[:3] == b'd8:'
+                
+                if not is_torrent_content_type and not is_torrent_format:
+                    save_debug_dump(r.text)
+                    
+                    # Анализируем что получили
+                    low = r.text.lower()
+                    if "login" in low and ("username" in low or "пароль" in low):
+                        raise RuTrackerError(
+                            "Rutracker требует повторной авторизации для скачивания. "
+                            "Обновите cookies из браузера.")
+                    if "соглас" in low or "accept" in low or "rules" in low:
+                        raise RuTrackerError(
+                            "Rutracker требует согласия с правилами. "
+                            "Войдите в браузер, скачайте любой торрент вручную (нажмите 'Согласен'), "
+                            "затем обновите cookies.")
+                    if "captcha" in low or "капча" in low:
+                        raise RuTrackerCaptchaError(
+                            "Rutracker требует капчу для скачивания.")
+                    
+                    raise RuTrackerError(
+                        f"Получен не торрент-файл (content-type: {content_type}). "
+                        f"Debug-дамп: /data/debug_last_topic.html")
+                
+                print(f"[rutracker]   .torrent downloaded: {len(r.content)} bytes")
                 return r.content
+                
+        except httpx.HTTPError as e:
+            raise RuTrackerError(f"Сетевая ошибка при скачивании торрента: {e}")
                 
         except httpx.HTTPError as e:
             raise RuTrackerError(f"Сетевая ошибка при скачивании торрента: {e}")

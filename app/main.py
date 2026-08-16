@@ -1887,7 +1887,7 @@ async def check_distribution(title_external_id: str, sort: str = "date"):
     ok, message = await check_distribution_now(title_external_id)
     msg_param = "dist-checked" if ok else "dist-check-fail"
     set_setting("last_dist_check", message)
-    return RedirectResponse(f"/?sort={sort}&msg={msg_parameter}", status_code=303)
+    return RedirectResponse(f"/?sort={sort}&msg={msg_param}", status_code=303)
 
 
 @app.post("/settings/tracker/test")
