@@ -1,7 +1,7 @@
 import os
 import json
 import tempfile
-import base64
+import asyncio
 from typing import Optional
 from transmission_rpc import Client, TransmissionError
 
@@ -42,112 +42,76 @@ class TransmissionClient:
         except Exception as e:
             return False, str(e)
 
+    def _safe_get(self, torrent, attr: str, default=None):
+        """Безопасно получает атрибут торрента."""
+        try:
+            return getattr(torrent, attr, default)
+        except Exception:
+            return default
+
     def add_torrent(self, torrent_data: bytes, download_dir: str = None,
                     paused: bool = False) -> dict:
         """Добавляет торрент в Transmission.
         
-        Пробует несколько способов в зависимости от версии transmission-rpc:
-        1. bytes напрямую как первый аргумент (v4+)
-        2. file:// URI через временный файл
-        3. Параметр metainfo (v3)
-        
-        Args:
-            torrent_data: содержимое .torrent файла (bytes)
-            download_dir: путь для скачивания (None = использовать дефолт)
-            paused: добавить на паузу
-        
-        Returns:
-            dict с информацией о торренте
+        Использует bytes напрямую (поддерживается в transmission-rpc v4+).
         """
         client = self.connect()
-        torrent_b64 = base64.b64encode(torrent_data).decode('ascii')
         
-        # Собираем общие параметры
-        common_kwargs = {'paused': paused}
+        # Собираем параметры
+        kwargs = {'paused': paused}
         if download_dir:
-            common_kwargs['download_dir'] = download_dir
+            kwargs['download_dir'] = download_dir
         
-        last_error = None
-        
-        # Способ 1: bytes напрямую (transmission-rpc v4+)
         try:
-            print("[transmission] Attempt 1: bytes as positional argument")
-            torrent = client.add_torrent(torrent_data, **common_kwargs)
-            return self._build_result(torrent, "bytes")
-        except TypeError as e:
-            if "unexpected keyword" in str(e) or "positional" in str(e):
-                print(f"[transmission]   Attempt 1 failed: {e}")
-                last_error = e
-            else:
-                raise
-        except Exception as e:
-            print(f"[transmission]   Attempt 1 error: {e}")
-            last_error = e
-        
-        # Способ 2: file:// URI через временный файл
-        tmp_path = None
-        try:
-            print("[transmission] Attempt 2: file:// URI via temp file")
-            with tempfile.NamedTemporaryFile(mode='wb', suffix='.torrent', delete=False) as tmp:
-                tmp.write(torrent_data)
-                tmp_path = tmp.name
+            print(f"[transmission] Adding torrent ({len(torrent_data)} bytes)")
+            torrent = client.add_torrent(torrent_data, **kwargs)
             
-            file_uri = f"file://{tmp_path}"
-            torrent = client.add_torrent(file_uri, **common_kwargs)
-            result = self._build_result(torrent, "file://")
-            return result
-        except TypeError as e:
-            if "unexpected keyword" in str(e) or "positional" in str(e):
-                print(f"[transmission]   Attempt 2 failed: {e}")
-                last_error = e
-            else:
-                raise
+            # Получаем hash — он всегда доступен
+            torrent_hash = self._safe_get(torrent, 'hashString') or \
+                           self._safe_get(torrent, 'hash')
+            torrent_name = self._safe_get(torrent, 'name') or \
+                           self._safe_get(torrent, 'torrent_name') or 'unknown'
+            
+            print(f"[transmission] Added: {torrent_name} ({torrent_hash})")
+            
+            # Делаем повторный запрос для получения полной информации
+            # (некоторые поля недоступны сразу после добавления)
+            torrent_size = 0
+            try:
+                # Небольшая задержка чтобы Transmission обработал торрент
+                import time
+                time.sleep(0.5)
+                
+                fresh_torrent = client.get_torrent(torrent_hash)
+                torrent_size = (self._safe_get(fresh_torrent, 'total_size') or
+                                self._safe_get(fresh_torrent, 'totalSize') or
+                                self._safe_get(fresh_torrent, 'sizeWhenDone') or
+                                0)
+                # Обновляем имя если получили
+                fresh_name = self._safe_get(fresh_torrent, 'name')
+                if fresh_name:
+                    torrent_name = fresh_name
+                print(f"[transmission] Got full info: size={torrent_size}")
+            except Exception as e:
+                print(f"[transmission] Could not get full info: {e}")
+            
+            return {
+                'hash': torrent_hash,
+                'name': torrent_name,
+                'size': torrent_size,
+                'status': 'added',
+            }
+            
+        except TransmissionError as e:
+            error_msg = str(e)
+            print(f"[transmission] TransmissionError: {error_msg}")
+            raise Exception(f"Ошибка добавления торрента: {error_msg}")
         except Exception as e:
-            print(f"[transmission]   Attempt 2 error: {e}")
-            last_error = e
-        finally:
-            if tmp_path and os.path.exists(tmp_path):
-                try:
-                    os.unlink(tmp_path)
-                except Exception:
-                    pass
-        
-        # Способ 3: base64 как первый позиционный аргумент
-        try:
-            print("[transmission] Attempt 3: base64 as positional argument")
-            torrent = client.add_torrent(torrent_b64, **common_kwargs)
-            return self._build_result(torrent, "base64")
-        except Exception as e:
-            print(f"[transmission]   Attempt 3 error: {e}")
-            last_error = e
-        
-        # Способ 4: явный параметр torrent=bytes
-        try:
-            print("[transmission] Attempt 4: torrent=bytes kwarg")
-            torrent = client.add_torrent(torrent=torrent_data, **common_kwargs)
-            return self._build_result(torrent, "torrent=bytes")
-        except Exception as e:
-            print(f"[transmission]   Attempt 4 error: {e}")
-            last_error = e
-        
-        # Если ничего не сработало — проверяем какие параметры принимает add_torrent
-        import inspect
-        sig = inspect.signature(client.add_torrent)
-        print(f"[transmission] add_torrent signature: {sig}")
-        raise Exception(f"Не удалось добавить торрент ни одним способом. "
-                        f"Последняя ошибка: {last_error}. "
-                        f"Сигнатура add_torrent: {sig}")
-
-    def _build_result(self, torrent, method: str) -> dict:
-        """Собирает информацию о добавленном торренте."""
-        print(f"[transmission] Added via method '{method}': {torrent.name}")
-        return {
-            'hash': torrent.hashString,
-            'name': torrent.name,
-            'size': torrent.total_size,
-            'status': 'added',
-            'method': method
-        }
+            error_msg = str(e)
+            print(f"[transmission] Unexpected error: {type(e).__name__}: {error_msg}")
+            import traceback
+            traceback.print_exc()
+            raise Exception(f"Не удалось добавить торрент: {error_msg}")
 
     def get_torrent_status(self, torrent_hash: str) -> Optional[dict]:
         """Получает статус торрента по хэшу."""
@@ -156,16 +120,19 @@ class TransmissionClient:
             torrent = client.get_torrent(torrent_hash)
             
             return {
-                'hash': torrent.hashString,
-                'name': torrent.name,
-                'status': torrent.status,
-                'progress': torrent.progress,
-                'size': torrent.total_size,
-                'downloaded': torrent.downloaded_ever,
-                'rate_down': torrent.rate_download,
-                'rate_up': torrent.rate_upload,
-                'eta': torrent.eta.seconds if torrent.eta else None,
-                'is_finished': torrent.is_finished
+                'hash': self._safe_get(torrent, 'hashString', torrent_hash),
+                'name': self._safe_get(torrent, 'name', 'unknown'),
+                'status': self._safe_get(torrent, 'status', 'unknown'),
+                'progress': self._safe_get(torrent, 'progress', 0),
+                'size': (self._safe_get(torrent, 'total_size') or
+                         self._safe_get(torrent, 'totalSize') or
+                         self._safe_get(torrent, 'sizeWhenDone') or 0),
+                'downloaded': self._safe_get(torrent, 'downloadedEver', 0),
+                'rate_down': self._safe_get(torrent, 'rateDownload', 0),
+                'rate_up': self._safe_get(torrent, 'rateUpload', 0),
+                'eta': (self._safe_get(torrent, 'eta') or 
+                        self._safe_get(torrent, 'eta_seconds') or 0),
+                'is_finished': self._safe_get(torrent, 'isFinished', False),
             }
         except TransmissionError:
             return None
