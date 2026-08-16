@@ -25,7 +25,6 @@ class TransmissionClient:
                 password=self.password if self.password else None,
                 timeout=self.timeout
             )
-            # Проверка соединения
             client.session_stats()
             return client
         except TransmissionError as e:
@@ -45,7 +44,7 @@ class TransmissionClient:
 
     def add_torrent(self, torrent_data: bytes, download_dir: str = None,
                     paused: bool = False) -> dict:
-        """Добавляет торрент в Transmission через временный файл.
+        """Добавляет торрент в Transmission через base64.
         
         Args:
             torrent_data: содержимое .torrent файла (bytes)
@@ -55,23 +54,27 @@ class TransmissionClient:
         Returns:
             dict с информацией о торренте
         """
-        tmp_path = None
         try:
             client = self.connect()
             
-            # Сохраняем во временный файл
-            with tempfile.NamedTemporaryFile(mode='wb', suffix='.torrent', delete=False) as tmp:
-                tmp.write(torrent_data)
-                tmp_path = tmp.name
+            # Проверяем что данные выглядят как .torrent
+            if not torrent_data.startswith(b'd8:'):
+                print(f"[transmission] WARNING: torrent data doesn't start with 'd8:'")
+                print(f"[transmission] First 50 bytes: {torrent_data[:50]}")
             
-            print(f"[transmission] Saved torrent to temp file: {tmp_path}")
+            # Кодируем в base64
+            torrent_b64 = base64.b64encode(torrent_data).decode('ascii')
+            print(f"[transmission] Encoded torrent to base64: {len(torrent_b64)} chars")
             
-            # Передаём путь к файлу
-            torrent = client.add_torrent(
-                torrent=tmp_path,
-                download_dir=download_dir,
-                paused=paused
-            )
+            # Используем параметр metainfo для base64-encoded данных
+            kwargs = {
+                'metainfo': torrent_b64,
+                'paused': paused
+            }
+            if download_dir:
+                kwargs['download_dir'] = download_dir
+            
+            torrent = client.add_torrent(**kwargs)
             
             result = {
                 'hash': torrent.hashString,
@@ -86,26 +89,19 @@ class TransmissionClient:
         except TransmissionError as e:
             error_msg = str(e)
             print(f"[transmission] TransmissionError: {error_msg}")
+            # Добавляем диагностику
+            print(f"[transmission] Torrent data size: {len(torrent_data)} bytes")
+            print(f"[transmission] Torrent data starts with: {torrent_data[:20]}")
             raise Exception(f"Ошибка добавления торрента: {error_msg}")
         except Exception as e:
             error_msg = str(e)
             print(f"[transmission] Unexpected error: {error_msg}")
+            import traceback
+            traceback.print_exc()
             raise Exception(f"Не удалось добавить торрент: {error_msg}")
-        finally:
-            # Удаляем временный файл
-            if tmp_path and os.path.exists(tmp_path):
-                try:
-                    os.unlink(tmp_path)
-                    print(f"[transmission] Removed temp file: {tmp_path}")
-                except Exception as e:
-                    print(f"[transmission] Failed to remove temp file: {e}")
 
     def get_torrent_status(self, torrent_hash: str) -> Optional[dict]:
-        """Получает статус торрента по хэшу.
-        
-        Returns:
-            dict с информацией о статусе или None если не найден
-        """
+        """Получает статус торрента по хэшу."""
         try:
             client = self.connect()
             torrent = client.get_torrent(torrent_hash)
