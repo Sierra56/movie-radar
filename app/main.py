@@ -571,6 +571,17 @@ def ensure_schema():
             last_updated_at TEXT,
             FOREIGN KEY (distribution_id) REFERENCES distributions(id) ON DELETE CASCADE
          )""", write=True)
+    db("""CREATE TABLE IF NOT EXISTS sent_notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            notification_type TEXT NOT NULL,
+            external_id TEXT NOT NULL,
+            details TEXT,
+            sent_date TEXT NOT NULL,
+            sent_at TEXT DEFAULT (datetime('now'))
+         )""", write=True)
+    db("""CREATE INDEX IF NOT EXISTS idx_sent_notifications_lookup
+          ON sent_notifications(notification_type, external_id, sent_date)""",
+       write=True)
 
 
 ensure_schema()
@@ -761,6 +772,28 @@ def format_size(size_bytes: int) -> str:
     if size_mb > 1024:
         return f"{size_mb / 1024:.2f} ГБ"
     return f"{size_mb:.1f} МБ"
+
+def was_notified_today(notification_type: str, external_id: str, details: str = "") -> bool:
+    """Проверяет, было ли отправлено уведомление этого типа сегодня."""
+    today = date.today().isoformat()
+    rows = db("""SELECT 1 FROM sent_notifications
+                 WHERE notification_type=? AND external_id=? AND details=? AND sent_date=?""",
+              (notification_type, external_id, details, today))
+    return bool(rows)
+
+
+def mark_notified_today(notification_type: str, external_id: str, details: str = ""):
+    """Помечает уведомление как отправленное сегодня."""
+    today = date.today().isoformat()
+    db("""INSERT INTO sent_notifications (notification_type, external_id, details, sent_date)
+          VALUES (?,?,?,?)""",
+       (notification_type, external_id, details, today), write=True)
+
+
+def cleanup_old_notifications(days_to_keep: int = 7):
+    """Удаляет старые записи об уведомлениях старше указанного количества дней."""
+    cutoff = (date.today() - timedelta(days=days_to_keep)).isoformat()
+    db("DELETE FROM sent_notifications WHERE sent_date < ?", (cutoff,), write=True)
 
 
 # ── Seasons & episodes helpers ────────────────────────
@@ -1051,8 +1084,24 @@ async def notify_new_episodes(show_title: str, new_eps: list, force: bool = Fals
 
     sorted_eps = sorted(new_eps, key=lambda x: (x["season_number"], x["episode_number"]))
 
-    if len(sorted_eps) == 1:
-        ep = sorted_eps[0]
+    # Фильтруем эпизоды, о которых уже уведомляли сегодня
+    eps_to_notify = []
+    for ep in sorted_eps:
+        # Создаём уникальный идентификатор эпизода
+        ep_id = f"{ep['season_number']}_{ep['episode_number']}"
+        details = json.dumps({"season": ep['season_number'], "episode": ep['episode_number']})
+        
+        if not was_notified_today("new_episode", show_title, details):
+            eps_to_notify.append(ep)
+            # Помечаем как уведомлённое (чтобы не отправить повторно сегодня)
+            mark_notified_today("new_episode", show_title, details)
+
+    if not eps_to_notify:
+        print(f"[telegram] All episodes already notified today: {show_title}")
+        return
+
+    if len(eps_to_notify) == 1:
+        ep = eps_to_notify[0]
         lines = [
             "🆕 <b>Новый эпизод</b>",
             "",
@@ -1067,11 +1116,11 @@ async def notify_new_episodes(show_title: str, new_eps: list, force: bool = Fals
                 lines.append(f"📅 {human_date(ep['release_date'])}")
     else:
         lines = [
-            f"🆕 <b>Новые эпизоды ({len(sorted_eps)})</b>",
+            f"🆕 <b>Новые эпизоды ({len(eps_to_notify)})</b>",
             "",
             f"📺 <b>{show_title}</b>",
         ]
-        for ep in sorted_eps:
+        for ep in eps_to_notify:
             name_str = f": {ep['name']}" if ep["name"] else ""
             if is_today(ep["release_date"]):
                 lines.append(f"• 🔴 S{ep['season_number']}E{ep['episode_number']}"
@@ -1082,7 +1131,7 @@ async def notify_new_episodes(show_title: str, new_eps: list, force: bool = Fals
                              f"{name_str}{date_str}")
 
     await send_telegram("\n".join(lines))
-    print(f"[telegram] New episodes notification: {show_title} ({len(sorted_eps)} eps)")
+    print(f"[telegram] New episodes notification: {show_title} ({len(eps_to_notify)} eps)")
 
 
 async def notify_torrent_started(title: str, torrent_name: str,
@@ -1128,6 +1177,7 @@ async def notify_torrent_completed(title: str, torrent_name: str,
 
 
 async def check_and_notify(force: bool = False):
+    cleanup_old_notifications(7)
     s = get_telegram_settings()
     if not force and (not s or not s.get("enabled")):
         return
@@ -2098,6 +2148,7 @@ async def index(request: Request, sort: str = "date",
         "refresh-started": "Обновление запущено в фоне.",
         "card-updated": "Карточка обновлена.",
         "dist-added": "Раздача добавлена.",
+        "dist-updated": "Раздача обновлена. Сбросьте проверку (⟳) для загрузки нового списка файлов.",
         "dist-removed": "Раздача удалена.",
         "dist-checked": get_setting("last_dist_check") or "Проверка выполнена.",
         "dist-downloaded": get_setting("last_dist_download") or "Торрент отправлен в Transmission.",
@@ -2498,24 +2549,36 @@ async def add_distribution(title_external_id: str = Form(...),
                            mode: str = Form("smart"),
                            check_interval_hours: int = Form(6)):
     existing = get_distribution(title_external_id)
-    if existing:
-        return RedirectResponse("/?msg=dist-exists", status_code=303)
-
     torrent_id = parse_torrent_id(url)
+    
     if not torrent_id:
         return RedirectResponse("/?msg=dist-invalid-url", status_code=303)
 
     if mode not in ("smart", "fixed"):
         mode = "smart"
 
-    db("""INSERT INTO distributions
-          (title_external_id, tracker_name, torrent_id, url, download_path,
-           mode, check_interval_hours, status)
-          VALUES (?, 'rutracker', ?, ?, ?, ?, ?, 'idle')""",
-       (title_external_id, torrent_id, url.strip(), download_path.strip(),
-        mode, max(1, min(168, check_interval_hours))),
-       write=True)
-    return RedirectResponse("/?msg=dist-added", status_code=303)
+    if existing:
+        # Обновляем существующую раздачу
+        db("""UPDATE distributions SET
+                tracker_name='rutracker', torrent_id=?, url=?, download_path=?,
+                mode=?, check_interval_hours=?, status='idle',
+                last_checked_at=NULL, last_files_hash=NULL, last_files_json=NULL,
+                new_files_count=0, error_message=NULL, error_count=0
+              WHERE title_external_id=?""",
+           (torrent_id, url.strip(), download_path.strip(),
+            mode, max(1, min(168, check_interval_hours)), title_external_id),
+           write=True)
+        return RedirectResponse("/?msg=dist-updated", status_code=303)
+    else:
+        # Создаём новую раздачу
+        db("""INSERT INTO distributions
+              (title_external_id, tracker_name, torrent_id, url, download_path,
+               mode, check_interval_hours, status)
+              VALUES (?, 'rutracker', ?, ?, ?, ?, ?, 'idle')""",
+           (title_external_id, torrent_id, url.strip(), download_path.strip(),
+            mode, max(1, min(168, check_interval_hours))),
+           write=True)
+        return RedirectResponse("/?msg=dist-added", status_code=303)
 
 
 @app.post("/distribution/remove/{title_external_id}")

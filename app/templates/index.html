@@ -324,8 +324,13 @@
         margin-left: 4px;
     }
 
+    .dist-text .edit-hint {
+        color: var(--accent);
+    }
+
     .btn-check,
-    .btn-download {
+    .btn-download,
+    .btn-remove {
         width: 24px;
         height: 24px;
         border-radius: 50%;
@@ -352,6 +357,14 @@
 
     .btn-download:hover {
         filter: brightness(1.15);
+    }
+
+    .btn-remove {
+        background: var(--delete-btn-bg);
+    }
+
+    .btn-remove:hover {
+        background: var(--delete-btn-hover);
     }
 
     @keyframes pulse {
@@ -460,6 +473,12 @@
     .radio-row label {
         margin: 0;
     }
+
+    .modal-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 16px;
+    }
 </style>
 {% endblock %}
 
@@ -544,30 +563,39 @@
                 </label>
             </form>
 
-            {% if c.has_distribution %}
-            <div class="dist-row" title="Раздача: {{ c.distribution_status }}">
-                <button class="btn-dist {{ c.distribution_status }}">🎬</button>
+            <div class="dist-row clickable"
+                onclick="openDistModal('{{ c.external_id }}', '{{ c.title|e }}', {{ c.has_distribution|tojson }})">
+                <button class="btn-dist {{ c.distribution_status if c.has_distribution else '' }}">🎬</button>
                 <span class="dist-text">
+                    {% if c.has_distribution %}
                     {% if c.distribution_status == 'has_new' %}новые эпизоды{% if c.new_count %}<span class="count">{{
                         c.new_count }}</span>{% endif %}
                     {% elif c.distribution_status == 'downloading' %}скачивается
                     {% elif c.distribution_status == 'error' %}ошибка
                     {% elif c.distribution_status == 'dead' %}неактивна
                     {% else %}отслеживается{% endif %}
+                    · <span class="edit-hint">изменить</span>
+                    {% else %}
+                    добавить раздачу
+                    {% endif %}
                 </span>
+            </div>
+
+            {% if c.has_distribution %}
+            <div class="dist-row" style="margin-top:4px;">
                 <form method="post" action="/distribution/check/{{ c.external_id }}?sort={{ sort }}"
-                    onclick="event.stopPropagation()">
+                    style="display:inline;" onclick="event.stopPropagation()">
                     <button class="btn-check" title="Проверить раздачу сейчас">⟳</button>
                 </form>
                 <form method="post" action="/distribution/download/{{ c.external_id }}?sort={{ sort }}"
-                    onclick="event.stopPropagation()" onsubmit="return confirmDownload('{{ c.title|e }}')">
+                    style="display:inline;" onclick="event.stopPropagation()"
+                    onsubmit="return confirmDownload('{{ c.title|e }}')">
                     <button class="btn-download" title="Скачать в Transmission">📥</button>
                 </form>
-            </div>
-            {% else %}
-            <div class="dist-row clickable" onclick="openDistModal('{{ c.external_id }}', '{{ c.title|e }}')">
-                <button class="btn-dist" title="Добавить раздачу">🎬</button>
-                <span class="dist-text">добавить раздачу</span>
+                <form method="post" action="/distribution/remove/{{ c.external_id }}?sort={{ sort }}"
+                    style="display:inline;" onclick="event.stopPropagation()" onsubmit="return confirmRemove()">
+                    <button class="btn-remove" title="Удалить раздачу">🗑</button>
+                </form>
             </div>
             {% endif %}
         </div>
@@ -590,6 +618,8 @@
                     <label>Ссылка на раздачу (rutracker)</label>
                     <input type="text" name="url" id="dist-url"
                         placeholder="https://rutracker.org/forum/viewtopic.php?t=..." required>
+                    <p class="hint">При сохранении статус проверки сбрасывается — потребуется ⟳ для загрузки нового
+                        списка файлов.</p>
                 </div>
                 <div class="field">
                     <label>Путь сохранения (опционально)</label>
@@ -605,11 +635,15 @@
                     <div class="radio-row">
                         <input type="radio" name="mode" value="fixed" id="mode-fixed">
                         <label for="mode-fixed">Жёсткий, раз в</label>
-                        <input type="number" name="check_interval_hours" value="6" min="1" max="168" style="width:70px">
+                        <input type="number" name="check_interval_hours" id="dist-interval" value="6" min="1" max="168"
+                            style="width:70px">
                         <label>часов</label>
                     </div>
                 </div>
-                <button type="submit">Добавить раздачу</button>
+                <div class="modal-actions">
+                    <button type="submit">Сохранить</button>
+                    <button type="button" class="secondary" onclick="closeDistModal()">Отмена</button>
+                </div>
             </form>
         </div>
     </div>
@@ -640,9 +674,40 @@
     }
     pollProgress();
 
-    function openDistModal(titleId, titleName) {
+    // Данные раздач для предзаполнения модалки
+    const distributionsData = {
+  {% for c in cards %}
+    {% if c.has_distribution %}
+    "{{ c.external_id }}": {
+        "url": "{{ c.distribution_url|e if c.distribution_url else '' }}",
+            "download_path": "{{ c.distribution_download_path|e if c.distribution_download_path else '' }}",
+                "mode": "{{ c.distribution_mode if c.distribution_mode else 'smart' }}",
+                    "check_interval_hours": { { c.distribution_check_interval_hours if c.distribution_check_interval_hours else 6 } }
+    },
+    {% endif %}
+    {% endfor %}
+};
+
+    function openDistModal(titleId, titleName, hasDistribution) {
         document.getElementById('dist-title-id').value = titleId;
-        document.getElementById('dist-modal-title').textContent = 'Добавить раздачу: ' + titleName;
+        document.getElementById('dist-modal-title').textContent =
+            hasDistribution ? 'Изменить раздачу: ' + titleName : 'Добавить раздачу: ' + titleName;
+
+        // Предзаполняем данные если раздача уже есть
+        const dist = distributionsData[titleId];
+        if (dist) {
+            document.getElementById('dist-url').value = dist.url || '';
+            document.getElementById('dist-path').value = dist.download_path || '';
+            document.querySelector(`input[name="mode"][value="${dist.mode}"]`).checked = true;
+            document.getElementById('dist-interval').value = dist.check_interval_hours || 6;
+        } else {
+            // Очищаем форму для новой раздачи
+            document.getElementById('dist-url').value = '';
+            document.getElementById('dist-path').value = '';
+            document.querySelector('input[name="mode"][value="smart"]').checked = true;
+            document.getElementById('dist-interval').value = 6;
+        }
+
         document.getElementById('dist-modal').classList.add('open');
     }
 
@@ -654,8 +719,16 @@
         return confirm(`Отправить раздачу «${titleName}» в Transmission?\n\nСкачивание начнётся сразу (согласно настройкам Transmission).`);
     }
 
+    function confirmRemove() {
+        return confirm('Удалить раздачу из отслеживания?\n\nКарточка останется, но раздача больше не будет проверяться.');
+    }
+
     document.getElementById('dist-modal').addEventListener('click', function (e) {
         if (e.target === this) closeDistModal();
+    });
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') closeDistModal();
     });
 </script>
 {% endblock %}
