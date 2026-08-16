@@ -44,7 +44,12 @@ class TransmissionClient:
 
     def add_torrent(self, torrent_data: bytes, download_dir: str = None,
                     paused: bool = False) -> dict:
-        """Добавляет торрент в Transmission через base64.
+        """Добавляет торрент в Transmission.
+        
+        Пробует несколько способов в зависимости от версии transmission-rpc:
+        1. bytes напрямую как первый аргумент (v4+)
+        2. file:// URI через временный файл
+        3. Параметр metainfo (v3)
         
         Args:
             torrent_data: содержимое .torrent файла (bytes)
@@ -54,51 +59,95 @@ class TransmissionClient:
         Returns:
             dict с информацией о торренте
         """
+        client = self.connect()
+        torrent_b64 = base64.b64encode(torrent_data).decode('ascii')
+        
+        # Собираем общие параметры
+        common_kwargs = {'paused': paused}
+        if download_dir:
+            common_kwargs['download_dir'] = download_dir
+        
+        last_error = None
+        
+        # Способ 1: bytes напрямую (transmission-rpc v4+)
         try:
-            client = self.connect()
-            
-            # Проверяем что данные выглядят как .torrent
-            if not torrent_data.startswith(b'd8:'):
-                print(f"[transmission] WARNING: torrent data doesn't start with 'd8:'")
-                print(f"[transmission] First 50 bytes: {torrent_data[:50]}")
-            
-            # Кодируем в base64
-            torrent_b64 = base64.b64encode(torrent_data).decode('ascii')
-            print(f"[transmission] Encoded torrent to base64: {len(torrent_b64)} chars")
-            
-            # Используем параметр metainfo для base64-encoded данных
-            kwargs = {
-                'metainfo': torrent_b64,
-                'paused': paused
-            }
-            if download_dir:
-                kwargs['download_dir'] = download_dir
-            
-            torrent = client.add_torrent(**kwargs)
-            
-            result = {
-                'hash': torrent.hashString,
-                'name': torrent.name,
-                'size': torrent.total_size,
-                'status': 'added'
-            }
-            
-            print(f"[transmission] Added torrent: {result['name']} ({result['hash']})")
-            return result
-            
-        except TransmissionError as e:
-            error_msg = str(e)
-            print(f"[transmission] TransmissionError: {error_msg}")
-            # Добавляем диагностику
-            print(f"[transmission] Torrent data size: {len(torrent_data)} bytes")
-            print(f"[transmission] Torrent data starts with: {torrent_data[:20]}")
-            raise Exception(f"Ошибка добавления торрента: {error_msg}")
+            print("[transmission] Attempt 1: bytes as positional argument")
+            torrent = client.add_torrent(torrent_data, **common_kwargs)
+            return self._build_result(torrent, "bytes")
+        except TypeError as e:
+            if "unexpected keyword" in str(e) or "positional" in str(e):
+                print(f"[transmission]   Attempt 1 failed: {e}")
+                last_error = e
+            else:
+                raise
         except Exception as e:
-            error_msg = str(e)
-            print(f"[transmission] Unexpected error: {error_msg}")
-            import traceback
-            traceback.print_exc()
-            raise Exception(f"Не удалось добавить торрент: {error_msg}")
+            print(f"[transmission]   Attempt 1 error: {e}")
+            last_error = e
+        
+        # Способ 2: file:// URI через временный файл
+        tmp_path = None
+        try:
+            print("[transmission] Attempt 2: file:// URI via temp file")
+            with tempfile.NamedTemporaryFile(mode='wb', suffix='.torrent', delete=False) as tmp:
+                tmp.write(torrent_data)
+                tmp_path = tmp.name
+            
+            file_uri = f"file://{tmp_path}"
+            torrent = client.add_torrent(file_uri, **common_kwargs)
+            result = self._build_result(torrent, "file://")
+            return result
+        except TypeError as e:
+            if "unexpected keyword" in str(e) or "positional" in str(e):
+                print(f"[transmission]   Attempt 2 failed: {e}")
+                last_error = e
+            else:
+                raise
+        except Exception as e:
+            print(f"[transmission]   Attempt 2 error: {e}")
+            last_error = e
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+        
+        # Способ 3: base64 как первый позиционный аргумент
+        try:
+            print("[transmission] Attempt 3: base64 as positional argument")
+            torrent = client.add_torrent(torrent_b64, **common_kwargs)
+            return self._build_result(torrent, "base64")
+        except Exception as e:
+            print(f"[transmission]   Attempt 3 error: {e}")
+            last_error = e
+        
+        # Способ 4: явный параметр torrent=bytes
+        try:
+            print("[transmission] Attempt 4: torrent=bytes kwarg")
+            torrent = client.add_torrent(torrent=torrent_data, **common_kwargs)
+            return self._build_result(torrent, "torrent=bytes")
+        except Exception as e:
+            print(f"[transmission]   Attempt 4 error: {e}")
+            last_error = e
+        
+        # Если ничего не сработало — проверяем какие параметры принимает add_torrent
+        import inspect
+        sig = inspect.signature(client.add_torrent)
+        print(f"[transmission] add_torrent signature: {sig}")
+        raise Exception(f"Не удалось добавить торрент ни одним способом. "
+                        f"Последняя ошибка: {last_error}. "
+                        f"Сигнатура add_torrent: {sig}")
+
+    def _build_result(self, torrent, method: str) -> dict:
+        """Собирает информацию о добавленном торренте."""
+        print(f"[transmission] Added via method '{method}': {torrent.name}")
+        return {
+            'hash': torrent.hashString,
+            'name': torrent.name,
+            'size': torrent.total_size,
+            'status': 'added',
+            'method': method
+        }
 
     def get_torrent_status(self, torrent_hash: str) -> Optional[dict]:
         """Получает статус торрента по хэшу."""
