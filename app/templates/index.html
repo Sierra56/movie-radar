@@ -419,6 +419,15 @@
 {% endblock %}
 
 {% block content %}
+{# Человекочитаемые статусы раздач #}
+{% set status_labels = {
+'idle': 'отслеживается',
+'has_new': 'найдены новые файлы',
+'error': 'ошибка проверки',
+'dead': 'раздача неактивна',
+'downloading': 'скачивается в Transmission'
+} %}
+
 <h1 class="page-title">📋 Список</h1>
 
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
@@ -495,17 +504,17 @@
 
             {% if c.has_distribution %}
             <button class="btn-full btn-dist-{{ c.distribution_status }} js-dist-btn" type="button"
-                title="Статус: {{ c.distribution_status }}" data-id="{{ c.external_id }}" data-title="{{ c.title|e }}"
-                data-has="true" data-url="{{ (c.distribution_url or '')|e }}"
-                data-path="{{ (c.distribution_download_path or '')|e }}"
+                title="Раздача: {{ status_labels.get(c.distribution_status, c.distribution_status) }}"
+                data-id="{{ c.external_id }}" data-title="{{ c.title|e }}" data-has="true"
+                data-url="{{ (c.distribution_url or '')|e }}" data-path="{{ (c.distribution_download_path or '')|e }}"
                 data-mode="{{ (c.distribution_mode or 'smart')|e }}"
                 data-interval="{{ c.distribution_check_interval_hours or 6 }}">
                 🎬 Изменить раздачу{% if c.distribution_status == 'has_new' and c.new_count %}<span
                     class="count-badge">{{ c.new_count }}</span>{% endif %}
             </button>
             {% else %}
-            <button class="btn-full btn-dist-add js-dist-btn" type="button" data-id="{{ c.external_id }}"
-                data-title="{{ c.title|e }}" data-has="false">
+            <button class="btn-full btn-dist-add js-dist-btn" type="button" title="Раздача ещё не добавлена"
+                data-id="{{ c.external_id }}" data-title="{{ c.title|e }}" data-has="false">
                 🎬 Добавить раздачу
             </button>
             {% endif %}
