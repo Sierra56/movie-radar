@@ -1905,9 +1905,9 @@ async def check_distribution_now(title_external_id: str) -> tuple:
                 trans_client = build_transmission_client()
                 result = trans_client.add_torrent(torrent_data, download_dir, paused)
 
-                new_status = "idle"
-                db("UPDATE distributions SET status=? WHERE id=?",
-                   (new_status, dist["id"]), write=True)
+                # После отправки в Transmission возвращаем статус в idle
+                db("UPDATE distributions SET status='idle' WHERE id=?",
+                   (dist["id"],), write=True)
                 db("""INSERT INTO download_history
                       (distribution_id, file_name, file_size, transmission_hash, sent_at)
                       VALUES (?, ?, ?, ?, datetime('now'))""",
@@ -1943,7 +1943,7 @@ async def check_distribution(title_external_id: str, sort: str = "date"):
     ok, message = await check_distribution_now(title_external_id)
     msg_param = "dist-checked" if ok else "dist-check-fail"
     set_setting("last_dist_check", message)
-    return RedirectResponse(f"/?sort={sort}&msg={msg_param}", status_code=303)
+    return RedirectResponse(f"/?sort={sort}&msg={msg_parameter}", status_code=303)
 
 
 @app.post("/settings/tracker/test")
@@ -2045,9 +2045,9 @@ async def download_distribution(title_external_id: str, sort: str = "date"):
         trans_client = build_transmission_client()
         result = trans_client.add_torrent(torrent_data, download_dir, paused)
 
-        new_status = "idle"
-        db("UPDATE distributions SET status=?, error_count=0, error_message=NULL WHERE id=?",
-           (new_status, dist["id"]), write=True)
+        # После отправки в Transmission возвращаем статус в idle
+        db("UPDATE distributions SET status='idle', error_count=0, error_message=NULL WHERE id=?",
+           (dist["id"],), write=True)
 
         db("""INSERT INTO download_history
               (distribution_id, file_name, file_size, transmission_hash, sent_at)
