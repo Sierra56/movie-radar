@@ -571,7 +571,6 @@ def ensure_schema():
             FOREIGN KEY (distribution_id) REFERENCES distributions(id) ON DELETE CASCADE
          )""", write=True)
 
-    # Таблица-предохранитель от повторных уведомлений
     db("""CREATE TABLE IF NOT EXISTS sent_notifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             notification_type TEXT NOT NULL,
@@ -729,7 +728,7 @@ def log_update(external_id: str, title: str, field: str,
        (external_id, title, field, old_value, new_value), write=True)
 
 
-# ── Helpers ──────────────────────────────────────────
+# ── Helpers ─────────────────────────────────────────
 def human_date(iso: str | None) -> str | None:
     if not iso:
         return None
@@ -797,8 +796,6 @@ def format_size(size_bytes: int) -> str:
 
 # ── Seasons & episodes helpers ────────────────────────
 async def save_seasons(title_external_id: str, seasons: list) -> list:
-    """Сохраняет сезоны. ВАЖНО: использует UPDATE для существующих,
-    чтобы сохранить id (эпизоды привязаны к season_id)."""
     existing = db("SELECT season_number, id FROM seasons WHERE title_external_id=?",
                   (title_external_id,))
     existing_map = {r["season_number"]: r["id"] for r in existing}
@@ -813,7 +810,6 @@ async def save_seasons(title_external_id: str, seasons: list) -> list:
             poster_local = await download_image(url, filename) or url
 
         if s["season_number"] in existing_map:
-            # UPDATE сохраняет id — эпизоды не теряются
             if poster_local:
                 db("""UPDATE seasons SET name=?, release_date=?, episodes=?, poster_url=?
                       WHERE id=?""",
@@ -1102,7 +1098,6 @@ async def notify_new_episodes(show_title: str, new_eps: list, force: bool = Fals
 
     sorted_eps = sorted(new_eps, key=lambda x: (x["season_number"], x["episode_number"]))
 
-    # Фильтруем эпизоды, о которых уже уведомляли сегодня (предохранитель от дублей)
     eps_to_notify = []
     for ep in sorted_eps:
         details = json.dumps({"season": ep["season_number"], "episode": ep["episode_number"]})
@@ -1910,7 +1905,7 @@ async def check_distribution_now(title_external_id: str) -> tuple:
                 trans_client = build_transmission_client()
                 result = trans_client.add_torrent(torrent_data, download_dir, paused)
 
-                new_status = "downloading" if not paused else "idle"
+                new_status = "idle"
                 db("UPDATE distributions SET status=? WHERE id=?",
                    (new_status, dist["id"]), write=True)
                 db("""INSERT INTO download_history
@@ -2050,7 +2045,7 @@ async def download_distribution(title_external_id: str, sort: str = "date"):
         trans_client = build_transmission_client()
         result = trans_client.add_torrent(torrent_data, download_dir, paused)
 
-        new_status = "downloading" if not paused else "idle"
+        new_status = "idle"
         db("UPDATE distributions SET status=?, error_count=0, error_message=NULL WHERE id=?",
            (new_status, dist["id"]), write=True)
 
@@ -2088,12 +2083,10 @@ async def test_transmission():
     try:
         trans_client = build_transmission_client()
         ok, message = trans_client.test_connection()
-        if ok:
-            set_setting("last_trans_test", message)
-            return RedirectResponse("/settings?msg=transmission-test-ok", status_code=303)
-        else:
-            set_setting("last_trans_test", message)
-            return RedirectResponse("/settings?msg=transmission-test-fail", status_code=303)
+        set_setting("last_trans_test", message)
+        return RedirectResponse(
+            "/settings?msg=" + ("transmission-test-ok" if ok else "transmission-test-fail"),
+            status_code=303)
     except Exception as e:
         print(f"[transmission-test] Error: {e}")
         set_setting("last_trans_test", str(e))

@@ -53,6 +53,7 @@
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
         gap: 16px;
+        align-items: stretch;
     }
 
     .card {
@@ -94,6 +95,7 @@
 
     .info {
         padding: 12px 12px 4px;
+        flex: 1 1 auto;
     }
 
     .card h2 {
@@ -188,13 +190,13 @@
         border: 1px dashed var(--accent);
     }
 
-    /* Кнопки под карточкой */
     .card-buttons {
         padding: 8px 12px 12px;
         margin-top: auto;
         display: flex;
         flex-direction: column;
         gap: 6px;
+        flex: 0 0 auto;
     }
 
     .btn-full {
@@ -211,6 +213,7 @@
         border: 1px solid;
         font-weight: 500;
         transition: background .15s, filter .15s;
+        white-space: nowrap;
     }
 
     .btn-full:hover {
@@ -248,29 +251,19 @@
         color: #3ddc84;
     }
 
-    /* Многоцветная кнопка раздачи (статус = цвет) */
     .btn-dist-add {
         border-color: #b07ce8;
         color: #b07ce8;
     }
 
-    /* нет раздачи */
     .btn-dist-idle {
         border-color: #4f8cff;
         color: #4f8cff;
     }
 
-    /* отслеживается */
     .btn-dist-has_new {
         border-color: #3ddc84;
         color: #3ddc84;
-    }
-
-    /* новые эпизоды */
-    .btn-dist-downloading {
-        border-color: #4f8cff;
-        color: #4f8cff;
-        animation: pulse 1.5s infinite;
     }
 
     .btn-dist-error {
@@ -278,24 +271,22 @@
         color: #f5a623;
     }
 
-    /* ошибка */
     .btn-dist-dead {
         border-color: #8b93a7;
         color: #8b93a7;
         opacity: .6;
     }
 
-    /* неактивна */
-    @keyframes pulse {
-
-        0%,
-        100% {
-            opacity: 1;
-        }
-
-        50% {
-            opacity: .5;
-        }
+    .count-badge {
+        margin-left: 6px;
+        background: var(--error);
+        color: #fff;
+        border-radius: 999px;
+        padding: 0 7px;
+        font-size: 11px;
+        line-height: 16px;
+        display: inline-block;
+        white-space: nowrap;
     }
 
     .notify-row {
@@ -502,21 +493,14 @@
                 <button class="btn-full btn-red" type="submit">🗑 Удалить</button>
             </form>
 
-            {# Многоцветная кнопка раздачи: цвет = статус #}
             {% if c.has_distribution %}
             <button class="btn-full btn-dist-{{ c.distribution_status }}" type="button"
-                title="Статус: {{ c.distribution_status }}"
-                onclick="openDistModal('{{ c.external_id }}', '{{ c.title|e }}', true)">
-                🎬 Изменить раздачу
-                {% if c.distribution_status == 'has_new' %}· новые{% if c.new_count %} ({{ c.new_count }}){% endif %}
-                {% elif c.distribution_status == 'downloading' %}· качается
-                {% elif c.distribution_status == 'error' %}· ошибка
-                {% elif c.distribution_status == 'dead' %}· неактивна
-                {% else %}· ок{% endif %}
+                title="Статус раздачи: {{ c.distribution_status }}" onclick="openDistModal('{{ c.external_id }}')">
+                🎬 Изменить раздачу{% if c.distribution_status == 'has_new' and c.new_count %}<span
+                    class="count-badge">{{ c.new_count }}</span>{% endif %}
             </button>
             {% else %}
-            <button class="btn-full btn-dist-add" type="button"
-                onclick="openDistModal('{{ c.external_id }}', '{{ c.title|e }}', false)">
+            <button class="btn-full btn-dist-add" type="button" onclick="openDistModal('{{ c.external_id }}')">
                 🎬 Добавить раздачу
             </button>
             {% endif %}
@@ -528,7 +512,7 @@
             </form>
 
             <form method="post" action="/distribution/download/{{ c.external_id }}?sort={{ sort }}"
-                onsubmit="return confirmDownload('{{ c.title|e }}')">
+                onsubmit="return confirmDownload('{{ c.external_id }}')">
                 <button class="btn-full btn-green" type="submit" {% if not c.has_distribution %}disabled{% endif %}>
                     ⬇ Скачать торрент
                 </button>
@@ -616,31 +600,34 @@
     }
     pollProgress();
 
-    const distributionsData = {
+    // Данные карточек и раздач (tojson = безопасное экранирование)
+    const cardsData = {
   {% for c in cards %}
-    {% if c.has_distribution %}
     "{{ c.external_id }}": {
-        "url": "{{ c.distribution_url|e if c.distribution_url else '' }}",
-            "download_path": "{{ c.distribution_download_path|e if c.distribution_download_path else '' }}",
-                "mode": "{{ c.distribution_mode if c.distribution_mode else 'smart' }}",
-                    "check_interval_hours": { { c.distribution_check_interval_hours if c.distribution_check_interval_hours else 6 } }
+        "title": { { c.title | tojson } },
+        "has": { { c.has_distribution | tojson } },
+        "url": { { (c.distribution_url or '') | tojson } },
+        "download_path": { { (c.distribution_download_path or '') | tojson } },
+        "mode": { { (c.distribution_mode or 'smart') | tojson } },
+        "check_interval_hours": { { c.distribution_check_interval_hours or 6 } }
     },
-    {% endif %}
     {% endfor %}
 };
 
-    function openDistModal(titleId, titleName, hasDistribution) {
-        document.getElementById('dist-title-id').value = titleId;
-        document.getElementById('dist-modal-title').textContent =
-            hasDistribution ? 'Изменить раздачу: ' + titleName : 'Добавить раздачу: ' + titleName;
+    function openDistModal(id) {
+        const d = cardsData[id];
+        if (!d) return;
 
-        const dist = distributionsData[titleId];
-        if (dist) {
-            document.getElementById('dist-url').value = dist.url || '';
-            document.getElementById('dist-path').value = dist.download_path || '';
-            const modeInput = document.querySelector(`input[name="mode"][value="${dist.mode}"]`);
+        document.getElementById('dist-title-id').value = id;
+        document.getElementById('dist-modal-title').textContent =
+            (d.has ? 'Изменить раздачу: ' : 'Добавить раздачу: ') + d.title;
+
+        if (d.has) {
+            document.getElementById('dist-url').value = d.url || '';
+            document.getElementById('dist-path').value = d.download_path || '';
+            const modeInput = document.querySelector(`input[name="mode"][value="${d.mode}"]`);
             if (modeInput) modeInput.checked = true;
-            document.getElementById('dist-interval').value = dist.check_interval_hours || 6;
+            document.getElementById('dist-interval').value = d.check_interval_hours || 6;
         } else {
             document.getElementById('dist-url').value = '';
             document.getElementById('dist-path').value = '';
@@ -655,8 +642,10 @@
         document.getElementById('dist-modal').classList.remove('open');
     }
 
-    function confirmDownload(titleName) {
-        return confirm(`Отправить раздачу «${titleName}» в Transmission?\n\nСкачивание начнётся сразу (согласно настройкам Transmission).`);
+    function confirmDownload(id) {
+        const d = cardsData[id];
+        const name = d ? d.title : id;
+        return confirm(`Отправить раздачу «${name}» в Transmission?\n\nСкачивание начнётся сразу (согласно настройкам Transmission).`);
     }
 
     document.getElementById('dist-modal').addEventListener('click', function (e) {
