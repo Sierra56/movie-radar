@@ -54,7 +54,7 @@ TORRENT_TABLES = ["tracker_credentials", "transmission_settings",
 ENCRYPTION_KEY_PATH = os.path.join(os.path.dirname(DB_PATH), "encryption.key")
 
 
-# ── Encryption ────────────────────────────────────────
+# ── Encryption ───────────────────────────────────────
 def get_encryption_key() -> bytes:
     if os.path.exists(ENCRYPTION_KEY_PATH):
         with open(ENCRYPTION_KEY_PATH, "rb") as f:
@@ -515,11 +515,15 @@ def ensure_schema():
             min_file_size_mb INTEGER DEFAULT 500,
             default_check_interval INTEGER DEFAULT 6,
             default_download_behavior TEXT DEFAULT 'use_distribution_path',
-            auto_download_new_files INTEGER DEFAULT 0
+            auto_download_new_files INTEGER DEFAULT 0,
+            auto_check_enabled INTEGER DEFAULT 1,
+            auto_check_tick_minutes INTEGER DEFAULT 10
          )""", write=True)
     db("INSERT OR IGNORE INTO transmission_settings (id) VALUES (1)", write=True)
     for col in ("default_download_behavior TEXT DEFAULT 'use_distribution_path'",
-                "auto_download_new_files INTEGER DEFAULT 0"):
+                "auto_download_new_files INTEGER DEFAULT 0",
+                "auto_check_enabled INTEGER DEFAULT 1",
+                "auto_check_tick_minutes INTEGER DEFAULT 10"):
         try:
             db(f"ALTER TABLE transmission_settings ADD COLUMN {col}", write=True)
         except sqlite3.OperationalError:
@@ -540,16 +544,18 @@ def ensure_schema():
             last_files_json TEXT,
             last_episode_detected TEXT,
             next_episode_air_date TEXT,
+            last_new_files_at TEXT,
             new_files_count INTEGER DEFAULT 0,
             error_message TEXT,
             error_count INTEGER DEFAULT 0,
             added_at TEXT DEFAULT (datetime('now'))
          )""", write=True)
-    try:
-        db("ALTER TABLE distributions ADD COLUMN new_files_count INTEGER DEFAULT 0",
-           write=True)
-    except sqlite3.OperationalError:
-        pass
+    for col in ("new_files_count INTEGER DEFAULT 0",
+                "last_new_files_at TEXT"):
+        try:
+            db(f"ALTER TABLE distributions ADD COLUMN {col}", write=True)
+        except sqlite3.OperationalError:
+            pass
 
     db("""CREATE TABLE IF NOT EXISTS download_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -728,7 +734,7 @@ def log_update(external_id: str, title: str, field: str,
        (external_id, title, field, old_value, new_value), write=True)
 
 
-# ── Helpers ─────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────
 def human_date(iso: str | None) -> str | None:
     if not iso:
         return None
@@ -880,6 +886,21 @@ def get_next_season(external_id: str) -> dict | None:
                  WHERE title_external_id=? AND release_date >= date('now')
                  ORDER BY release_date LIMIT 1""", (external_id,))
     return dict(rows[0]) if rows else None
+
+
+def update_next_episode_air_date(external_id: str):
+    """Записывает в раздачу дату ближайшего будущего эпизода (для смарт-режима)."""
+    dist = get_distribution(external_id)
+    if not dist:
+        return
+    rows = db("""SELECT e.release_date FROM episodes e
+                 JOIN seasons s ON e.season_id = s.id
+                 WHERE s.title_external_id=? AND e.release_date >= date('now')
+                 ORDER BY e.release_date LIMIT 1""", (external_id,))
+    new_date = rows[0]["release_date"] if rows else None
+    if new_date != dist.get("next_episode_air_date"):
+        db("UPDATE distributions SET next_episode_air_date=? WHERE id=?",
+           (new_date, dist["id"]), write=True)
 
 
 # ── Watched episodes helpers ──────────────────────────
@@ -1399,6 +1420,8 @@ async def refresh_catalog():
 
                     if new_episodes_all:
                         await notify_new_episodes(new_title, new_episodes_all)
+
+                    update_next_episode_air_date(row["external_id"])
                 except Exception as e:
                     print(f"[refresh] Error fetching seasons for {row['external_id']}: {e}")
 
@@ -1490,6 +1513,8 @@ async def refresh_single(external_id: str) -> bool:
 
                 if new_episodes_all:
                     await notify_new_episodes(new_title, new_episodes_all)
+
+                update_next_episode_air_date(external_id)
             except Exception as e:
                 print(f"[refresh-single] Error refreshing seasons: {e}")
 
@@ -1504,12 +1529,105 @@ scheduler.add_job(refresh_catalog, "interval", hours=get_refresh_hours(),
                   id="refresh", next_run_time=None)
 
 
+# ── Stage 4: auto-check distributions ────────────────
+def effective_interval_hours(dist: dict) -> float:
+    """Вычисляет эффективный интервал проверки раздачи (в часах)."""
+    trans = get_transmission_settings() or {}
+    base = float(dist.get("check_interval_hours") or
+                 trans.get("default_check_interval") or 6)
+
+    if dist.get("mode") == "fixed":
+        return base
+
+    interval = base
+
+    # Коэффициент активности: недавние обновления → чаще, давно мертва → реже
+    if dist.get("last_new_files_at"):
+        try:
+            last_new = datetime.fromisoformat(dist["last_new_files_at"])
+            days_since = (datetime.now() - last_new).days
+            if days_since <= 7:
+                interval *= 0.5
+            elif days_since >= 180:
+                interval *= 4
+            elif days_since >= 60:
+                interval *= 2
+        except ValueError:
+            pass
+
+    # Окно релиза: за сутки до и полтора после даты эпизода — раз в час
+    if dist.get("next_episode_air_date"):
+        try:
+            air = date.fromisoformat(dist["next_episode_air_date"])
+            delta = (air - date.today()).days
+            if -1 <= delta <= 1:
+                interval = min(interval, 1.0)
+        except ValueError:
+            pass
+
+    return max(0.5, interval)
+
+
+async def check_distributions_job():
+    """Фоновая задача: обходит раздачи и проверяет те, что подошли по сроку."""
+    trans = get_transmission_settings() or {}
+    if not trans.get("enabled") or not trans.get("auto_check_enabled", 1):
+        return
+
+    rows = db("SELECT * FROM distributions")
+    if not rows:
+        return
+
+    now = datetime.now()
+    checked = 0
+
+    for dist in rows:
+        try:
+            interval = effective_interval_hours(dist)
+
+            due = False
+            if not dist["last_checked_at"]:
+                due = True
+            else:
+                try:
+                    last = datetime.fromisoformat(dist["last_checked_at"])
+                    due = (now - last) >= timedelta(hours=interval)
+                except ValueError:
+                    due = True
+
+            if not due:
+                continue
+
+            ok, msg = await check_distribution_now(dist["title_external_id"])
+            checked += 1
+            print(f"[auto-check] {dist['title_external_id']}: {msg}")
+
+            # rate-limit между запросами к трекеру
+            await asyncio.sleep(10)
+        except Exception as e:
+            print(f"[auto-check] error for {dist['title_external_id']}: {e}")
+
+    if checked:
+        print(f"[auto-check] checked {checked} distributions")
+
+
+def schedule_distribution_job():
+    trans = get_transmission_settings() or {}
+    tick = int(trans.get("auto_check_tick_minutes") or 10)
+    tick = max(5, min(60, tick))
+    scheduler.add_job(check_distributions_job, "interval", minutes=tick,
+                      id="distribution_check", replace_existing=True,
+                      max_instances=1, coalesce=True)
+    print(f"[auto-check] Scheduled every {tick} min")
+
+
 @app.on_event("startup")
 async def on_startup():
     scheduler.start()
     scheduler.reschedule_job("refresh", trigger="interval", hours=get_refresh_hours())
     scheduler.modify_job("refresh", next_run_time=datetime.now() + timedelta(minutes=5))
     schedule_telegram_job()
+    schedule_distribution_job()
 
 
 @app.on_event("shutdown")
@@ -1740,6 +1858,7 @@ async def restore_backup(file: UploadFile = File(...)):
             scheduler.reschedule_job("refresh", trigger="interval",
                                      hours=get_refresh_hours())
             schedule_telegram_job()
+            schedule_distribution_job()
         except Exception as e:
             print(f"[backup] Error re-applying settings: {e}")
 
@@ -1892,6 +2011,10 @@ async def check_distribution_now(title_external_id: str) -> tuple:
        (new_hash, json.dumps(snapshot, ensure_ascii=False), status, new_count,
         dist["id"]), write=True)
 
+    if new_count:
+        db("UPDATE distributions SET last_new_files_at=datetime('now') WHERE id=?",
+           (dist["id"],), write=True)
+
     if new_count > 0:
         trans = get_transmission_settings()
         if (trans and trans.get("enabled") and
@@ -1905,7 +2028,6 @@ async def check_distribution_now(title_external_id: str) -> tuple:
                 trans_client = build_transmission_client()
                 result = trans_client.add_torrent(torrent_data, download_dir, paused)
 
-                # После отправки в Transmission возвращаем статус в idle
                 db("UPDATE distributions SET status='idle' WHERE id=?",
                    (dist["id"],), write=True)
                 db("""INSERT INTO download_history
@@ -1943,7 +2065,7 @@ async def check_distribution(title_external_id: str, sort: str = "date"):
     ok, message = await check_distribution_now(title_external_id)
     msg_param = "dist-checked" if ok else "dist-check-fail"
     set_setting("last_dist_check", message)
-    return RedirectResponse(f"/?sort={sort}&msg={msg_parameter}", status_code=303)
+    return RedirectResponse(f"/?sort={sort}&msg={msg_param}", status_code=303)
 
 
 @app.post("/settings/tracker/test")
@@ -2045,7 +2167,6 @@ async def download_distribution(title_external_id: str, sort: str = "date"):
         trans_client = build_transmission_client()
         result = trans_client.add_torrent(torrent_data, download_dir, paused)
 
-        # После отправки в Transmission возвращаем статус в idle
         db("UPDATE distributions SET status='idle', error_count=0, error_message=NULL WHERE id=?",
            (dist["id"],), write=True)
 
@@ -2263,6 +2384,7 @@ async def add_select(external_id: str = Form(...),
                         await asyncio.sleep(0.3)
                     except Exception:
                         pass
+                update_next_episode_air_date(info["external_id"])
             except Exception as e:
                 print(f"[add-select] Error fetching seasons: {e}")
 
@@ -2470,7 +2592,9 @@ async def save_transmission(host: str = Form("localhost"),
                             min_file_size_mb: int = Form(500),
                             default_check_interval: int = Form(6),
                             default_download_behavior: str = Form("use_distribution_path"),
-                            auto_download_new_files: str = Form("off")):
+                            auto_download_new_files: str = Form("off"),
+                            auto_check_enabled: str = Form("off"),
+                            auto_check_tick_minutes: int = Form(10)):
     if action_on_new not in ("download", "pause", "notify_only"):
         action_on_new = "download"
     if default_download_behavior not in ("use_distribution_path", "use_base_dir"):
@@ -2480,15 +2604,20 @@ async def save_transmission(host: str = Form("localhost"),
             host=?, port=?, username=?, encrypted_password=?, enabled=?,
             base_download_dir=?, action_on_new=?, filter_recent_only=?,
             min_file_size_mb=?, default_check_interval=?,
-            default_download_behavior=?, auto_download_new_files=?
+            default_download_behavior=?, auto_download_new_files=?,
+            auto_check_enabled=?, auto_check_tick_minutes=?
           WHERE id=1""",
        (host.strip(), port, username.strip(), encrypt_value(password.strip()),
         1 if enabled == "on" else 0, base_download_dir.strip(), action_on_new,
         1 if filter_recent_only == "on" else 0,
         max(1, min_file_size_mb), max(1, min(168, default_check_interval)),
         default_download_behavior,
-        1 if auto_download_new_files == "on" else 0),
+        1 if auto_download_new_files == "on" else 0,
+        1 if auto_check_enabled == "on" else 0,
+        max(5, min(60, auto_check_tick_minutes))),
        write=True)
+
+    schedule_distribution_job()
     return RedirectResponse("/settings?msg=transmission-saved", status_code=303)
 
 
@@ -2579,6 +2708,7 @@ async def add_distribution(title_external_id: str = Form(...),
            (torrent_id, url.strip(), download_path.strip(),
             mode, max(1, min(168, check_interval_hours)), title_external_id),
            write=True)
+        update_next_episode_air_date(title_external_id)
         return RedirectResponse("/?msg=dist-updated", status_code=303)
     else:
         db("""INSERT INTO distributions
@@ -2588,6 +2718,7 @@ async def add_distribution(title_external_id: str = Form(...),
            (title_external_id, torrent_id, url.strip(), download_path.strip(),
             mode, max(1, min(168, check_interval_hours))),
            write=True)
+        update_next_episode_air_date(title_external_id)
         return RedirectResponse("/?msg=dist-added", status_code=303)
 
 
@@ -2702,6 +2833,7 @@ async def refresh_seasons(external_id: str):
                 if new_episodes_all:
                     await notify_new_episodes(card["title"], new_episodes_all)
 
+                update_next_episode_air_date(external_id)
                 print(f"[seasons] Refreshed {len(seasons)} seasons for {card['title']}")
             except Exception as e:
                 print(f"[seasons] Error: {e}")
