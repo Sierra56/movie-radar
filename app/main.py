@@ -7,7 +7,9 @@ import uuid
 import hashlib
 import zipfile
 import tempfile
+import statistics
 import traceback
+import re as _re
 from abc import ABC, abstractmethod
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
@@ -54,7 +56,7 @@ TORRENT_TABLES = ["tracker_credentials", "transmission_settings",
 ENCRYPTION_KEY_PATH = os.path.join(os.path.dirname(DB_PATH), "encryption.key")
 
 
-# ── Encryption ───────────────────────────────────────
+# ── Encryption ────────────────────────────────────────
 def get_encryption_key() -> bytes:
     if os.path.exists(ENCRYPTION_KEY_PATH):
         with open(ENCRYPTION_KEY_PATH, "rb") as f:
@@ -550,8 +552,7 @@ def ensure_schema():
             error_count INTEGER DEFAULT 0,
             added_at TEXT DEFAULT (datetime('now'))
          )""", write=True)
-    for col in ("new_files_count INTEGER DEFAULT 0",
-                "last_new_files_at TEXT"):
+    for col in ("new_files_count INTEGER DEFAULT 0", "last_new_files_at TEXT"):
         try:
             db(f"ALTER TABLE distributions ADD COLUMN {col}", write=True)
         except sqlite3.OperationalError:
@@ -573,9 +574,15 @@ def ensure_schema():
             median_delay_hours INTEGER,
             samples_count INTEGER DEFAULT 0,
             confidence TEXT DEFAULT 'low',
+            min_samples INTEGER DEFAULT 3,
             last_updated_at TEXT,
             FOREIGN KEY (distribution_id) REFERENCES distributions(id) ON DELETE CASCADE
          )""", write=True)
+    try:
+        db("ALTER TABLE distribution_patterns ADD COLUMN min_samples INTEGER DEFAULT 3",
+           write=True)
+    except sqlite3.OperationalError:
+        pass
 
     db("""CREATE TABLE IF NOT EXISTS sent_notifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -734,7 +741,7 @@ def log_update(external_id: str, title: str, field: str,
        (external_id, title, field, old_value, new_value), write=True)
 
 
-# ── Helpers ────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────
 def human_date(iso: str | None) -> str | None:
     if not iso:
         return None
@@ -786,8 +793,7 @@ def parse_torrent_id(url: str) -> str | None:
         for pair in parsed.query.split("&"):
             if pair.startswith("t="):
                 return pair[2:]
-    import re
-    m = re.search(r"t=(\d+)", url)
+    m = _re.search(r"t=(\d+)", url)
     return m.group(1) if m else None
 
 
@@ -798,6 +804,110 @@ def format_size(size_bytes: int) -> str:
     if size_mb > 1024:
         return f"{size_mb / 1024:.2f} ГБ"
     return f"{size_mb:.1f} МБ"
+
+
+# ── Stage 5: episode parsing & learning ──────────────
+_EP_PATTERNS = [
+    _re.compile(r"[Ss](\d{1,2})\s*[Ee](\d{1,3})"),          # S01E05
+    _re.compile(r"(\d{1,2})\s*[xх]\s*(\d{1,3})"),           # 1x05
+    _re.compile(r"[Сс]езон\s*(\d{1,2}).*?[Сс]ери[ия]\s*(\d{1,3})"),  # Сезон 1 Серия 5
+    _re.compile(r"[Ee]pisode\s*(\d{1,3})"),                  # Episode 5 (season unknown)
+]
+
+
+def parse_episode(filename: str):
+    """Возвращает (season, episode) или None."""
+    m = _EP_PATTERNS[0].search(filename)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    m = _EP_PATTERNS[1].search(filename)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    m = _EP_PATTERNS[2].search(filename)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def lookup_episode_air_date(title_external_id: str, season: int, episode: int):
+    rows = db("""SELECT e.release_date FROM episodes e
+                 JOIN seasons s ON e.season_id = s.id
+                 WHERE s.title_external_id=? AND s.season_number=? AND e.episode_number=?""",
+              (title_external_id, season, episode))
+    return rows[0]["release_date"] if rows else None
+
+
+def get_pattern(distribution_id: int):
+    rows = db("SELECT * FROM distribution_patterns WHERE distribution_id=?",
+              (distribution_id,))
+    return dict(rows[0]) if rows else None
+
+
+def ensure_pattern(distribution_id: int):
+    db("INSERT OR IGNORE INTO distribution_patterns (distribution_id) VALUES (?)",
+       (distribution_id,), write=True)
+    return get_pattern(distribution_id)
+
+
+def recompute_pattern(distribution_id: int):
+    pat = get_pattern(distribution_id)
+    if not pat:
+        return
+    samples = json.loads(pat["samples_json"] or "[]")
+    delays = [s["delay_hours"] for s in samples if "delay_hours" in s]
+    count = len(delays)
+    median = round(statistics.median(delays)) if delays else None
+    min_samples = pat.get("min_samples") or 3
+    if count < min_samples:
+        confidence = "low"
+    elif count < min_samples + 3:
+        confidence = "medium"
+    else:
+        confidence = "high"
+    db("""UPDATE distribution_patterns SET median_delay_hours=?, samples_count=?,
+          confidence=?, last_updated_at=datetime('now') WHERE distribution_id=?""",
+       (median, count, confidence, distribution_id), write=True)
+
+
+def record_learning_samples(dist: dict, new_files: list):
+    """Добавляет образцы задержки для новых файлов (реальное обновление)."""
+    now = datetime.now()
+    pat = ensure_pattern(dist["id"])
+    samples = json.loads(pat["samples_json"] or "[]")
+    existing = {(s.get("season"), s.get("episode")) for s in samples}
+    added = 0
+
+    for name, size in new_files:
+        ep = parse_episode(name)
+        if not ep:
+            continue
+        season, episode = ep
+        if (season, episode) in existing:
+            continue
+        air = lookup_episode_air_date(dist["title_external_id"], season, episode)
+        if not air:
+            continue
+        try:
+            air_d = date.fromisoformat(air)
+        except ValueError:
+            continue
+        delay = (now - datetime(air_d.year, air_d.month, air_d.day)).total_seconds() / 3600
+        if delay < 0 or delay > 2000:
+            continue
+        samples.append({
+            "season": season, "episode": episode, "air_date": air,
+            "detected_at": now.isoformat(), "delay_hours": round(delay, 1),
+        })
+        existing.add((season, episode))
+        added += 1
+
+    if not added:
+        return
+    samples = samples[-20:]
+    db("UPDATE distribution_patterns SET samples_json=? WHERE distribution_id=?",
+       (json.dumps(samples, ensure_ascii=False), dist["id"]), write=True)
+    recompute_pattern(dist["id"])
+    print(f"[learn] {dist['title_external_id']}: +{added} samples")
 
 
 # ── Seasons & episodes helpers ────────────────────────
@@ -889,7 +999,6 @@ def get_next_season(external_id: str) -> dict | None:
 
 
 def update_next_episode_air_date(external_id: str):
-    """Записывает в раздачу дату ближайшего будущего эпизода (для смарт-режима)."""
     dist = get_distribution(external_id)
     if not dist:
         return
@@ -1028,13 +1137,10 @@ async def notify_date_changes(changes: list, force: bool = False):
     for c in changes:
         old_h = human_date(c["old_date"]) or "не указана"
         new_h = human_date(c["new_date"]) or "не указана"
-
         direction = ""
         if c["old_date"] and c["new_date"]:
             try:
-                old_d = date.fromisoformat(c["old_date"])
-                new_d = date.fromisoformat(c["new_date"])
-                delta = (new_d - old_d).days
+                delta = (date.fromisoformat(c["new_date"]) - date.fromisoformat(c["old_date"])).days
                 if delta > 0:
                     direction = f"⬇️ на {delta} {plural(delta, ('день', 'дня', 'дней'))} позже"
                 elif delta < 0:
@@ -1070,10 +1176,7 @@ async def notify_new_card(title: str, release_date, source: str,
     if type_label:
         lines.append(type_label)
     lines.append(f"🎬 <b>{title}</b>")
-    if release_date:
-        lines.append(f"📅 {human_date(release_date)}")
-    else:
-        lines.append("📅 дата неизвестна")
+    lines.append(f"📅 {human_date(release_date)}" if release_date else "📅 дата неизвестна")
     lines.append(f"Источник: {source}")
 
     await send_telegram("\n".join(lines))
@@ -1090,19 +1193,12 @@ async def notify_new_season(show_title: str, season_number: int,
 
     details = json.dumps({"season": season_number})
     if not force and was_notified_today("new_season", show_title, details):
-        print(f"[telegram] Season already notified today: {show_title} S{season_number}")
         return
     mark_notified_today("new_season", show_title, details)
 
-    lines = [
-        "🆕 <b>Новый сезон в каталоге</b>",
-        "",
-        f"📺 <b>{show_title}</b> — Сезон {season_number}",
-    ]
-    if release_date:
-        lines.append(f"📅 {human_date(release_date)}")
-    else:
-        lines.append("📅 дата неизвестна")
+    lines = ["🆕 <b>Новый сезон в каталоге</b>", "",
+             f"📺 <b>{show_title}</b> — Сезон {season_number}"]
+    lines.append(f"📅 {human_date(release_date)}" if release_date else "📅 дата неизвестна")
 
     await send_telegram("\n".join(lines))
     print(f"[telegram] New season notification: {show_title} S{season_number}")
@@ -1118,7 +1214,6 @@ async def notify_new_episodes(show_title: str, new_eps: list, force: bool = Fals
         return
 
     sorted_eps = sorted(new_eps, key=lambda x: (x["season_number"], x["episode_number"]))
-
     eps_to_notify = []
     for ep in sorted_eps:
         details = json.dumps({"season": ep["season_number"], "episode": ep["episode_number"]})
@@ -1127,38 +1222,26 @@ async def notify_new_episodes(show_title: str, new_eps: list, force: bool = Fals
             mark_notified_today("new_episode", show_title, details)
 
     if not eps_to_notify:
-        print(f"[telegram] All episodes already notified today: {show_title}")
         return
 
     if len(eps_to_notify) == 1:
         ep = eps_to_notify[0]
-        lines = [
-            "🆕 <b>Новый эпизод</b>",
-            "",
-            f"📺 <b>{show_title}</b> — S{ep['season_number']}E{ep['episode_number']}",
-        ]
+        lines = ["🆕 <b>Новый эпизод</b>", "",
+                 f"📺 <b>{show_title}</b> — S{ep['season_number']}E{ep['episode_number']}"]
         if ep["name"]:
             lines.append(f"«{ep['name']}»")
         if ep["release_date"]:
-            if is_today(ep["release_date"]):
-                lines.append("🔴 <b>Вышел сегодня!</b>")
-            else:
-                lines.append(f"📅 {human_date(ep['release_date'])}")
+            lines.append("🔴 <b>Вышел сегодня!</b>" if is_today(ep["release_date"])
+                         else f"📅 {human_date(ep['release_date'])}")
     else:
-        lines = [
-            f"🆕 <b>Новые эпизоды ({len(eps_to_notify)})</b>",
-            "",
-            f"📺 <b>{show_title}</b>",
-        ]
+        lines = [f"🆕 <b>Новые эпизоды ({len(eps_to_notify)})</b>", "", f"📺 <b>{show_title}</b>"]
         for ep in eps_to_notify:
             name_str = f": {ep['name']}" if ep["name"] else ""
             if is_today(ep["release_date"]):
-                lines.append(f"• 🔴 S{ep['season_number']}E{ep['episode_number']}"
-                             f"{name_str} — вышел сегодня!")
+                lines.append(f"• 🔴 S{ep['season_number']}E{ep['episode_number']}{name_str} — вышел сегодня!")
             else:
                 date_str = f" · {human_date(ep['release_date'])}" if ep["release_date"] else ""
-                lines.append(f"• S{ep['season_number']}E{ep['episode_number']}"
-                             f"{name_str}{date_str}")
+                lines.append(f"• S{ep['season_number']}E{ep['episode_number']}{name_str}{date_str}")
 
     await send_telegram("\n".join(lines))
     print(f"[telegram] New episodes notification: {show_title} ({len(eps_to_notify)} eps)")
@@ -1172,12 +1255,7 @@ async def notify_torrent_started(title: str, torrent_name: str,
     if not s or not s.get("bot_token") or not s.get("chat_id"):
         return
 
-    lines = [
-        "📥 <b>Начато скачивание</b>",
-        "",
-        f"🎬 <b>{title}</b>",
-        f"📦 {torrent_name}",
-    ]
+    lines = ["📥 <b>Начато скачивание</b>", "", f"🎬 <b>{title}</b>", f"📦 {torrent_name}"]
     if download_dir:
         lines.append(f"📂 {download_dir}")
     lines.append("⏳ Загрузка запущена в Transmission")
@@ -1194,13 +1272,8 @@ async def notify_torrent_completed(title: str, torrent_name: str,
     if not s or not s.get("bot_token") or not s.get("chat_id"):
         return
 
-    lines = [
-        "✅ <b>Скачивание завершено</b>",
-        "",
-        f"🎬 <b>{title}</b>",
-        f"📦 {torrent_name}",
-        f"📏 {format_size(size_bytes)}",
-    ]
+    lines = ["✅ <b>Скачивание завершено</b>", "", f"🎬 <b>{title}</b>",
+             f"📦 {torrent_name}", f"📏 {format_size(size_bytes)}"]
 
     await send_telegram("\n".join(lines))
     print(f"[telegram] Torrent completed notification: {title}")
@@ -1208,7 +1281,6 @@ async def notify_torrent_completed(title: str, torrent_name: str,
 
 async def check_and_notify(force: bool = False):
     cleanup_old_notifications(7)
-
     s = get_telegram_settings()
     if not force and (not s or not s.get("enabled")):
         return
@@ -1218,7 +1290,6 @@ async def check_and_notify(force: bool = False):
     notify_days = s.get("notify_days", 1)
 
     upcoming = []
-
     rows = db("SELECT * FROM titles WHERE release_date IS NOT NULL AND notify_enabled = 1")
     for r in rows:
         row = dict(r)
@@ -1231,8 +1302,7 @@ async def check_and_notify(force: bool = False):
             upcoming.append((delta, row["title"], row["release_date"]))
 
     season_rows = db("""SELECT s.*, t.title as show_title, t.notify_enabled
-                        FROM seasons s
-                        JOIN titles t ON s.title_external_id = t.external_id
+                        FROM seasons s JOIN titles t ON s.title_external_id = t.external_id
                         WHERE s.release_date IS NOT NULL AND t.notify_enabled = 1""")
     for r in season_rows:
         row = dict(r)
@@ -1242,17 +1312,12 @@ async def check_and_notify(force: bool = False):
             continue
         delta = (rd - today).days
         if 0 <= delta <= notify_days:
-            label = f"{row['show_title']} — Сезон {row['season_number']}"
-            upcoming.append((delta, label, row["release_date"]))
+            upcoming.append((delta, f"{row['show_title']} — Сезон {row['season_number']}", row["release_date"]))
 
-    episode_rows = db("""
-        SELECT e.name, e.release_date, e.episode_number,
-               s.season_number, t.title as show_title
-        FROM episodes e
-        JOIN seasons s ON e.season_id = s.id
-        JOIN titles t ON s.title_external_id = t.external_id
-        WHERE e.release_date IS NOT NULL AND t.notify_enabled = 1
-    """)
+    episode_rows = db("""SELECT e.name, e.release_date, e.episode_number, s.season_number, t.title as show_title
+                         FROM episodes e JOIN seasons s ON e.season_id = s.id
+                         JOIN titles t ON s.title_external_id = t.external_id
+                         WHERE e.release_date IS NOT NULL AND t.notify_enabled = 1""")
     for r in episode_rows:
         row = dict(r)
         try:
@@ -1268,11 +1333,7 @@ async def check_and_notify(force: bool = False):
 
     if not upcoming:
         if force:
-            await send_telegram(
-                f"🎬 <b>Тестовая рассылка</b>\n"
-                f"Предстоящих релизов в горизонте {notify_days} дн. нет.")
-        else:
-            print("[telegram] No upcoming releases to notify")
+            await send_telegram(f"🎬 <b>Тестовая рассылка</b>\nПредстоящих релизов в горизонте {notify_days} дн. нет.")
         return
 
     upcoming.sort()
@@ -1295,15 +1356,11 @@ def schedule_telegram_job():
     s = get_telegram_settings()
     send_time = s.get("send_time", "09:00") or "09:00"
     try:
-        hour, minute = send_time.split(":")
-        hour, minute = int(hour), int(minute)
+        hour, minute = map(int, send_time.split(":"))
     except (ValueError, AttributeError):
         hour, minute = 9, 0
-
-    scheduler.add_job(check_and_notify,
-                      CronTrigger(hour=hour, minute=minute),
-                      id="telegram_notify",
-                      replace_existing=True)
+    scheduler.add_job(check_and_notify, CronTrigger(hour=hour, minute=minute),
+                      id="telegram_notify", replace_existing=True)
     print(f"[telegram] Scheduled at {hour:02d}:{minute:02d}")
 
 
@@ -1321,11 +1378,9 @@ async def refresh_catalog():
 
     for i, r in enumerate(rows):
         row = dict(r)
-
         if row["source"] == "local":
             refresh_progress["done"] = i + 1
             continue
-
         if row["release_date"]:
             try:
                 rd = date.fromisoformat(row["release_date"])
@@ -1359,38 +1414,27 @@ async def refresh_catalog():
         new_genres = fresh["genres"] or row["genres"]
 
         if new_title != row["title"]:
-            log_update(row["external_id"], new_title, "title",
-                       row["title"], new_title)
+            log_update(row["external_id"], new_title, "title", row["title"], new_title)
             changed = True
         if new_rd != row["release_date"]:
-            log_update(row["external_id"], new_title, "release_date",
-                       row["release_date"], new_rd)
+            log_update(row["external_id"], new_title, "release_date", row["release_date"], new_rd)
             if row.get("notify_enabled") in (None, 1):
-                date_changes.append({
-                    "title": new_title,
-                    "old_date": row["release_date"],
-                    "new_date": new_rd,
-                })
+                date_changes.append({"title": new_title, "old_date": row["release_date"], "new_date": new_rd})
             changed = True
         if new_genres != row["genres"]:
-            log_update(row["external_id"], new_title, "genres",
-                       row["genres"], new_genres)
+            log_update(row["external_id"], new_title, "genres", row["genres"], new_genres)
             changed = True
 
         poster_local = row["poster_url"]
         if fresh.get("poster_url"):
-            filename = f"{sanitize_id(row['external_id'])}.jpg"
-            downloaded = await download_image(fresh["poster_url"], filename)
+            downloaded = await download_image(fresh["poster_url"], f"{sanitize_id(row['external_id'])}.jpg")
             if downloaded:
                 poster_local = downloaded
 
         if changed or poster_local != row["poster_url"]:
-            db("""UPDATE titles SET
-                    title=?, release_date=?, poster_url=?, genres=?,
-                    updated_at=datetime('now')
+            db("""UPDATE titles SET title=?, release_date=?, poster_url=?, genres=?, updated_at=datetime('now')
                   WHERE external_id=?""",
-               (new_title, new_rd, poster_local, new_genres, row["external_id"]),
-               write=True)
+               (new_title, new_rd, poster_local, new_genres, row["external_id"]), write=True)
             if changed:
                 updated += 1
 
@@ -1401,26 +1445,19 @@ async def refresh_catalog():
                     seasons = await src.fetch_seasons(tmdb_id)
                     new_seasons = await save_seasons(row["external_id"], seasons)
                     await asyncio.sleep(0.5)
-
                     for ns in new_seasons:
-                        await notify_new_season(new_title, ns["season_number"],
-                                                ns["release_date"])
-
+                        await notify_new_season(new_title, ns["season_number"], ns["release_date"])
                     new_episodes_all = []
                     for season in seasons:
                         try:
-                            episodes = await src.fetch_episodes(tmdb_id,
-                                                                season["season_number"])
-                            new_eps = await save_episodes(row["external_id"],
-                                                          season["season_number"], episodes)
+                            episodes = await src.fetch_episodes(tmdb_id, season["season_number"])
+                            new_eps = await save_episodes(row["external_id"], season["season_number"], episodes)
                             new_episodes_all.extend(new_eps)
                             await asyncio.sleep(0.5)
                         except Exception as e:
                             print(f"[refresh] Error fetching episodes S{season['season_number']}: {e}")
-
                     if new_episodes_all:
                         await notify_new_episodes(new_title, new_episodes_all)
-
                     update_next_episode_air_date(row["external_id"])
                 except Exception as e:
                     print(f"[refresh] Error fetching seasons for {row['external_id']}: {e}")
@@ -1429,7 +1466,6 @@ async def refresh_catalog():
 
     refresh_progress["running"] = False
     print(f"[refresh] Done. Updated: {updated}, Skipped (old): {skipped}")
-
     if date_changes:
         await notify_date_changes(date_changes)
 
@@ -1450,7 +1486,6 @@ async def refresh_single(external_id: str) -> bool:
     except Exception as e:
         print(f"[refresh-single] Error fetching {external_id}: {e}")
         return False
-
     if not fresh:
         return False
 
@@ -1464,14 +1499,9 @@ async def refresh_single(external_id: str) -> bool:
         log_update(external_id, new_title, "title", row["title"], new_title)
         changed = True
     if new_rd != row["release_date"]:
-        log_update(external_id, new_title, "release_date",
-                   row["release_date"], new_rd)
+        log_update(external_id, new_title, "release_date", row["release_date"], new_rd)
         if row.get("notify_enabled") in (None, 1):
-            date_change = {
-                "title": new_title,
-                "old_date": row["release_date"],
-                "new_date": new_rd,
-            }
+            date_change = {"title": new_title, "old_date": row["release_date"], "new_date": new_rd}
         changed = True
     if new_genres != row["genres"]:
         log_update(external_id, new_title, "genres", row["genres"], new_genres)
@@ -1479,15 +1509,12 @@ async def refresh_single(external_id: str) -> bool:
 
     poster_local = row["poster_url"]
     if fresh.get("poster_url"):
-        filename = f"{sanitize_id(external_id)}.jpg"
-        downloaded = await download_image(fresh["poster_url"], filename)
+        downloaded = await download_image(fresh["poster_url"], f"{sanitize_id(external_id)}.jpg")
         if downloaded:
             poster_local = downloaded
 
     if changed or poster_local != row["poster_url"]:
-        db("""UPDATE titles SET
-                title=?, release_date=?, poster_url=?, genres=?,
-                updated_at=datetime('now')
+        db("""UPDATE titles SET title=?, release_date=?, poster_url=?, genres=?, updated_at=datetime('now')
               WHERE external_id=?""",
            (new_title, new_rd, poster_local, new_genres, external_id), write=True)
 
@@ -1498,9 +1525,7 @@ async def refresh_single(external_id: str) -> bool:
                 seasons = await src.fetch_seasons(tmdb_id)
                 new_seasons = await save_seasons(external_id, seasons)
                 for ns in new_seasons:
-                    await notify_new_season(new_title, ns["season_number"],
-                                            ns["release_date"])
-
+                    await notify_new_season(new_title, ns["season_number"], ns["release_date"])
                 new_episodes_all = []
                 for season in seasons:
                     try:
@@ -1510,17 +1535,14 @@ async def refresh_single(external_id: str) -> bool:
                         await asyncio.sleep(0.3)
                     except Exception:
                         pass
-
                 if new_episodes_all:
                     await notify_new_episodes(new_title, new_episodes_all)
-
                 update_next_episode_air_date(external_id)
             except Exception as e:
                 print(f"[refresh-single] Error refreshing seasons: {e}")
 
     if date_change:
         await notify_date_changes([date_change])
-
     return changed
 
 
@@ -1529,19 +1551,16 @@ scheduler.add_job(refresh_catalog, "interval", hours=get_refresh_hours(),
                   id="refresh", next_run_time=None)
 
 
-# ── Stage 4: auto-check distributions ────────────────
+# ── Stage 4: auto-check ──────────────────────────────
 def effective_interval_hours(dist: dict) -> float:
-    """Вычисляет эффективный интервал проверки раздачи (в часах)."""
     trans = get_transmission_settings() or {}
-    base = float(dist.get("check_interval_hours") or
-                 trans.get("default_check_interval") or 6)
+    base = float(dist.get("check_interval_hours") or trans.get("default_check_interval") or 6)
 
     if dist.get("mode") == "fixed":
         return base
 
     interval = base
 
-    # Коэффициент активности: недавние обновления → чаще, давно мертва → реже
     if dist.get("last_new_files_at"):
         try:
             last_new = datetime.fromisoformat(dist["last_new_files_at"])
@@ -1555,7 +1574,21 @@ def effective_interval_hours(dist: dict) -> float:
         except ValueError:
             pass
 
-    # Окно релиза: за сутки до и полтора после даты эпизода — раз в час
+    now = datetime.now()
+
+    # Предсказание по обученному паттерну
+    pat = get_pattern(dist["id"])
+    if (pat and (pat.get("samples_count") or 0) >= (pat.get("min_samples") or 3)
+            and pat.get("median_delay_hours") and dist.get("next_episode_air_date")):
+        try:
+            air = date.fromisoformat(dist["next_episode_air_date"])
+            predicted = datetime(air.year, air.month, air.day) + timedelta(hours=pat["median_delay_hours"])
+            if predicted - timedelta(hours=6) <= now <= predicted + timedelta(hours=36):
+                interval = min(interval, 1.0)
+        except ValueError:
+            pass
+
+    # Грубое окно релиза (fallback)
     if dist.get("next_episode_air_date"):
         try:
             air = date.fromisoformat(dist["next_episode_air_date"])
@@ -1569,7 +1602,6 @@ def effective_interval_hours(dist: dict) -> float:
 
 
 async def check_distributions_job():
-    """Фоновая задача: обходит раздачи и проверяет те, что подошли по сроку."""
     trans = get_transmission_settings() or {}
     if not trans.get("enabled") or not trans.get("auto_check_enabled", 1):
         return
@@ -1580,11 +1612,9 @@ async def check_distributions_job():
 
     now = datetime.now()
     checked = 0
-
     for dist in rows:
         try:
             interval = effective_interval_hours(dist)
-
             due = False
             if not dist["last_checked_at"]:
                 due = True
@@ -1594,27 +1624,21 @@ async def check_distributions_job():
                     due = (now - last) >= timedelta(hours=interval)
                 except ValueError:
                     due = True
-
             if not due:
                 continue
-
             ok, msg = await check_distribution_now(dist["title_external_id"])
             checked += 1
             print(f"[auto-check] {dist['title_external_id']}: {msg}")
-
-            # rate-limit между запросами к трекеру
             await asyncio.sleep(10)
         except Exception as e:
             print(f"[auto-check] error for {dist['title_external_id']}: {e}")
-
     if checked:
         print(f"[auto-check] checked {checked} distributions")
 
 
 def schedule_distribution_job():
     trans = get_transmission_settings() or {}
-    tick = int(trans.get("auto_check_tick_minutes") or 10)
-    tick = max(5, min(60, tick))
+    tick = max(5, min(60, int(trans.get("auto_check_tick_minutes") or 10)))
     scheduler.add_job(check_distributions_job, "interval", minutes=tick,
                       id="distribution_check", replace_existing=True,
                       max_instances=1, coalesce=True)
@@ -1643,16 +1667,9 @@ def escape_ics(s):
 
 
 def build_ics(cards: list) -> str:
-    lines = [
-        "BEGIN:VCALENDAR",
-        "VERSION:2.0",
-        "PRODID:-//Movie Radar//RU",
-        "CALSCALE:GREGORIAN",
-        "METHOD:PUBLISH",
-        "X-WR-CALNAME:Скоро на экранах",
-        "X-WR-TIMEZONE:Europe/Moscow",
-        "X-APPLE-CALENDAR-COLOR:#4F8CFF",
-    ]
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Movie Radar//RU",
+             "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "X-WR-CALNAME:Скоро на экранах",
+             "X-WR-TIMEZONE:Europe/Moscow", "X-APPLE-CALENDAR-COLOR:#4F8CFF"]
     for c in cards:
         if not c.get("release_date"):
             continue
@@ -1664,27 +1681,19 @@ def build_ics(cards: list) -> str:
             desc_parts.append(f"Жанр: {c['genres']}")
         if c.get("source"):
             desc_parts.append(f"Источник: {c['source']}")
-        description = "\\n".join(desc_parts)
         dtstamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        lines.extend([
-            "BEGIN:VEVENT",
-            f"UID:{uid}@movieradar",
-            f"DTSTAMP:{dtstamp}",
-            f"DTSTART;VALUE=DATE:{c['release_date'].replace('-', '')}",
-            f"DTEND;VALUE=DATE:{c['release_date'].replace('-', '')}",
-            f"SUMMARY:{escape_ics('Премьера: ' + c['title'])}",
-            f"DESCRIPTION:{description}",
-            "STATUS:CONFIRMED",
-            "TRANSP:TRANSPARENT",
-            "END:VEVENT",
-        ])
+        lines.extend(["BEGIN:VEVENT", f"UID:{uid}@movieradar", f"DTSTAMP:{dtstamp}",
+                      f"DTSTART;VALUE=DATE:{c['release_date'].replace('-', '')}",
+                      f"DTEND;VALUE=DATE:{c['release_date'].replace('-', '')}",
+                      f"SUMMARY:{escape_ics('Премьера: ' + c['title'])}",
+                      f"DESCRIPTION:{escape_ics('\\n'.join(desc_parts))}",
+                      "STATUS:CONFIRMED", "TRANSP:TRANSPARENT", "END:VEVENT"])
     lines.append("END:VCALENDAR")
     return "\r\n".join(lines)
 
 
 # ── Backup / Restore ──────────────────────────────────
-def _build_backup_zip(include_settings: bool, include_cards: bool,
-                      include_images: bool, include_torrents: bool) -> io.BytesIO:
+def _build_backup_zip(include_settings, include_cards, include_images, include_torrents) -> io.BytesIO:
     tmp_db_fd, tmp_db_path = tempfile.mkstemp(suffix=".db")
     os.close(tmp_db_fd)
     try:
@@ -1692,7 +1701,6 @@ def _build_backup_zip(include_settings: bool, include_cards: bool,
         dst_conn = sqlite3.connect(tmp_db_path)
         src_conn.backup(dst_conn)
         src_conn.close()
-
         if not include_settings:
             for t in SETTINGS_TABLES:
                 dst_conn.execute(f"DROP TABLE IF EXISTS {t}")
@@ -1707,26 +1715,17 @@ def _build_backup_zip(include_settings: bool, include_cards: bool,
 
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            meta = {
-                "app": "movie-radar",
-                "backup_version": BACKUP_VERSION,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "include_settings": include_settings,
-                "include_cards": include_cards,
-                "include_images": include_images,
-                "include_torrents": include_torrents,
-            }
+            meta = {"app": "movie-radar", "backup_version": BACKUP_VERSION,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "include_settings": include_settings, "include_cards": include_cards,
+                    "include_images": include_images, "include_torrents": include_torrents}
             zf.writestr("meta.json", json.dumps(meta, ensure_ascii=False, indent=2))
             zf.write(tmp_db_path, "backup.db")
-
             if include_images and os.path.isdir(POSTERS_DIR):
                 for root, _, files in os.walk(POSTERS_DIR):
                     for fn in files:
                         full = os.path.join(root, fn)
-                        rel = os.path.relpath(full, POSTERS_DIR)
-                        arcname = os.path.join("posters", rel)
-                        zf.write(full, arcname)
-
+                        zf.write(full, os.path.join("posters", os.path.relpath(full, POSTERS_DIR)))
         buffer.seek(0)
         return buffer
     finally:
@@ -1735,42 +1734,29 @@ def _build_backup_zip(include_settings: bool, include_cards: bool,
 
 
 @app.post("/backup/create")
-async def create_backup(include_settings: str = Form("off"),
-                        include_cards: str = Form("off"),
-                        include_images: str = Form("off"),
-                        include_torrents: str = Form("off")):
-    inc_settings = include_settings == "on"
-    inc_cards = include_cards == "on"
-    inc_images = include_images == "on"
-    inc_torrents = include_torrents == "on"
-
-    if not (inc_settings or inc_cards or inc_images or inc_torrents):
+async def create_backup(include_settings: str = Form("off"), include_cards: str = Form("off"),
+                        include_images: str = Form("off"), include_torrents: str = Form("off")):
+    inc = [include_settings == "on", include_cards == "on", include_images == "on", include_torrents == "on"]
+    if not any(inc):
         return RedirectResponse("/settings?msg=backup-empty", status_code=303)
-
-    buffer = _build_backup_zip(inc_settings, inc_cards, inc_images, inc_torrents)
+    buffer = _build_backup_zip(*inc)
     filename = f"movie-radar-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.zip"
-    return StreamingResponse(
-        buffer,
-        media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
-    )
+    return StreamingResponse(buffer, media_type="application/zip",
+                             headers={"Content-Disposition": f"attachment; filename={filename}"})
 
 
 @app.post("/backup/restore")
 async def restore_backup(file: UploadFile = File(...)):
     if not file.filename or not file.filename.lower().endswith(".zip"):
         return RedirectResponse("/settings?msg=restore-invalid", status_code=303)
-
     content = await file.read()
     try:
         zf = zipfile.ZipFile(io.BytesIO(content))
     except zipfile.BadZipFile:
         return RedirectResponse("/settings?msg=restore-invalid", status_code=303)
-
     names = zf.namelist()
     if "meta.json" not in names or "backup.db" not in names:
         return RedirectResponse("/settings?msg=restore-invalid", status_code=303)
-
     try:
         meta = json.loads(zf.read("meta.json"))
     except (json.JSONDecodeError, KeyError):
@@ -1784,59 +1770,35 @@ async def restore_backup(file: UploadFile = File(...)):
             auto_path = os.path.join(os.path.dirname(DB_PATH), "auto-backup-latest.zip")
             with open(auto_path, "wb") as f:
                 f.write(auto_buffer.read())
-            print(f"[backup] Auto-backup saved to {auto_path}")
         except Exception as e:
-            print(f"[backup] Auto-backup failed (continuing): {e}")
+            print(f"[backup] Auto-backup failed: {e}")
 
         tmp_fd, tmp_path = tempfile.mkstemp(suffix=".db")
         os.close(tmp_fd)
         with zf.open("backup.db") as src, open(tmp_path, "wb") as dst:
             dst.write(src.read())
 
-        include_settings = meta.get("include_settings", False)
-        include_cards = meta.get("include_cards", False)
-        include_torrents = meta.get("include_torrents", False)
-
         conn = sqlite3.connect(DB_PATH)
         try:
             conn.execute("PRAGMA foreign_keys=OFF")
             conn.execute("ATTACH DATABASE ? AS backup", (tmp_path,))
-
             tables_to_restore = []
-            if include_settings:
+            if meta.get("include_settings"):
                 tables_to_restore.extend(SETTINGS_TABLES)
-            if include_cards:
+            if meta.get("include_cards"):
                 tables_to_restore.extend(CARD_TABLES)
-            if include_torrents:
+            if meta.get("include_torrents"):
                 tables_to_restore.extend(TORRENT_TABLES)
-
-            has_seq_table = conn.execute(
-                "SELECT name FROM backup.sqlite_master "
-                "WHERE type='table' AND name='sqlite_sequence'"
-            ).fetchone()
-
+            has_seq = conn.execute("SELECT name FROM backup.sqlite_master WHERE type='table' AND name='sqlite_sequence'").fetchone()
             for table in tables_to_restore:
-                row = conn.execute(
-                    "SELECT name FROM backup.sqlite_master WHERE type='table' AND name=?",
-                    (table,)).fetchone()
-                if not row:
+                if not conn.execute("SELECT name FROM backup.sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
                     continue
                 conn.execute(f"DELETE FROM main.{table}")
                 conn.execute(f"INSERT INTO main.{table} SELECT * FROM backup.{table}")
-
-                if has_seq_table:
-                    has_seq = conn.execute(
-                        "SELECT 1 FROM backup.sqlite_sequence WHERE name=?",
-                        (table,)).fetchone()
-                    if has_seq:
-                        max_id = conn.execute(
-                            f"SELECT MAX(id) FROM main.{table}").fetchone()[0] or 0
-                        conn.execute(
-                            "DELETE FROM main.sqlite_sequence WHERE name=?", (table,))
-                        conn.execute(
-                            "INSERT INTO main.sqlite_sequence (name, seq) VALUES (?,?)",
-                            (table, max_id))
-
+                if has_seq and conn.execute("SELECT 1 FROM backup.sqlite_sequence WHERE name=?", (table,)).fetchone():
+                    max_id = conn.execute(f"SELECT MAX(id) FROM main.{table}").fetchone()[0] or 0
+                    conn.execute("DELETE FROM main.sqlite_sequence WHERE name=?", (table,))
+                    conn.execute("INSERT INTO main.sqlite_sequence (name, seq) VALUES (?,?)", (table, max_id))
             conn.commit()
             conn.execute("DETACH DATABASE backup")
             conn.execute("PRAGMA foreign_keys=ON")
@@ -1844,24 +1806,21 @@ async def restore_backup(file: UploadFile = File(...)):
         finally:
             conn.close()
 
-        if meta.get("include_images", False):
+        if meta.get("include_images"):
             os.makedirs(POSTERS_DIR, exist_ok=True)
             for name in names:
                 if name.startswith("posters/") and not name.endswith("/"):
-                    rel = os.path.relpath(name, "posters")
-                    target = os.path.join(POSTERS_DIR, rel)
+                    target = os.path.join(POSTERS_DIR, os.path.relpath(name, "posters"))
                     os.makedirs(os.path.dirname(target), exist_ok=True)
                     with zf.open(name) as src, open(target, "wb") as dst:
                         dst.write(src.read())
 
         try:
-            scheduler.reschedule_job("refresh", trigger="interval",
-                                     hours=get_refresh_hours())
+            scheduler.reschedule_job("refresh", trigger="interval", hours=get_refresh_hours())
             schedule_telegram_job()
             schedule_distribution_job()
         except Exception as e:
             print(f"[backup] Error re-applying settings: {e}")
-
     except Exception as e:
         print(f"[backup] Restore error: {e}")
         traceback.print_exc()
@@ -1870,17 +1829,11 @@ async def restore_backup(file: UploadFile = File(...)):
         scheduler.resume()
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
-
     return RedirectResponse("/settings?msg=restore-ok", status_code=303)
 
 
-# ── Image proxy route ─────────────────────────────────
-_ALLOWED_IMG_HOSTS = {
-    "image.tmdb.org",
-    "m.media-amazon.com",
-    "ia.media-imdb.com",
-    "upload.wikimedia.org",
-}
+# ── Image proxy ───────────────────────────────────────
+_ALLOWED_IMG_HOSTS = {"image.tmdb.org", "m.media-amazon.com", "ia.media-imdb.com", "upload.wikimedia.org"}
 
 
 @app.get("/img-proxy")
@@ -1888,20 +1841,16 @@ async def img_proxy(url: str):
     parsed = urlparse(url)
     if parsed.hostname not in _ALLOWED_IMG_HOSTS:
         return Response(status_code=403)
-
     url_hash = hashlib.md5(url.encode()).hexdigest()
     cache_path = os.path.join(POSTERS_DIR, f"cache_{url_hash}.img")
     meta_path = os.path.join(POSTERS_DIR, f"cache_{url_hash}.mime")
-
     if os.path.exists(cache_path):
         media_type = "image/jpeg"
         if os.path.exists(meta_path):
-            with open(meta_path, "r") as f:
+            with open(meta_path) as f:
                 media_type = f.read().strip() or "image/jpeg"
         with open(cache_path, "rb") as f:
-            content = f.read()
-        return Response(content=content, media_type=media_type)
-
+            return Response(content=f.read(), media_type=media_type)
     try:
         proxy = get_proxy_url()
         client_kwargs = {"timeout": 15, "follow_redirects": True}
@@ -1918,7 +1867,7 @@ async def img_proxy(url: str):
                 f.write(media_type)
             return Response(content=content, media_type=media_type)
     except Exception as e:
-        print(f"[img-proxy] Error fetching {url}: {e}")
+        print(f"[img-proxy] Error: {e}")
         return Response(status_code=502)
 
 
@@ -1958,7 +1907,6 @@ async def check_distribution_now(title_external_id: str) -> tuple:
             db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name=?",
                (str(e), dist["tracker_name"]), write=True)
             return False, str(e)
-
         db("""UPDATE tracker_credentials SET encrypted_cookies=?, last_login_at=datetime('now'),
               last_error=NULL, error_count=0 WHERE tracker_name=?""",
            (encrypt_value(json.dumps(cookies)), dist["tracker_name"]), write=True)
@@ -1966,78 +1914,64 @@ async def check_distribution_now(title_external_id: str) -> tuple:
     try:
         files = await client.fetch_files(dist["torrent_id"], cookies)
     except RuTrackerForbiddenError as e:
-        db("UPDATE distributions SET status='error', error_message=? WHERE id=?",
-           (str(e), dist["id"]), write=True)
+        db("UPDATE distributions SET status='error', error_message=? WHERE id=?", (str(e), dist["id"]), write=True)
         if username and password:
-            print("[dist-check] 403 on fetch, attempting re-login")
             try:
                 new_cookies = await client.login()
-                db("""UPDATE tracker_credentials SET encrypted_cookies=?, last_login_at=datetime('now')
-                      WHERE tracker_name=?""",
+                db("UPDATE tracker_credentials SET encrypted_cookies=?, last_login_at=datetime('now') WHERE tracker_name=?",
                    (encrypt_value(json.dumps(new_cookies)), dist["tracker_name"]), write=True)
                 files = await client.fetch_files(dist["torrent_id"], new_cookies)
             except Exception as retry_err:
-                return False, f"Ошибка: {e} (повторная попытка: {retry_err})"
+                return False, f"Ошибка: {e} (повторная: {retry_err})"
         else:
             return False, f"{e} Обновите cookies в настройках."
     except RuTrackerError as e:
-        db("UPDATE distributions SET status='error', error_message=? WHERE id=?",
-           (str(e), dist["id"]), write=True)
+        db("UPDATE distributions SET status='error', error_message=? WHERE id=?", (str(e), dist["id"]), write=True)
         return False, str(e)
 
     if not files:
         db("""UPDATE distributions SET status='error',
-              error_message='Не удалось распарсить список файлов (debug-дамп сохранён)'
-              WHERE id=?""", (dist["id"],), write=True)
+              error_message='Не удалось распарсить список файлов (debug-дамп сохранён)' WHERE id=?""",
+           (dist["id"],), write=True)
         return False, "Не удалось распарсить список файлов. Debug-дамп: /data/debug_last_topic.html"
 
     snapshot = sorted([(f["name"], f["size"]) for f in files])
     new_hash = hashlib.md5(json.dumps(snapshot, ensure_ascii=False).encode()).hexdigest()
     old_hash = dist["last_files_hash"]
 
-    new_count = 0
+    new_files = []
     if old_hash and old_hash != new_hash:
         try:
             old_files = json.loads(dist["last_files_json"] or "[]")
         except json.JSONDecodeError:
             old_files = []
         old_names = {f[0] for f in old_files}
-        new_count = len([f for f in snapshot if f[0] not in old_names])
+        new_files = [f for f in snapshot if f[0] not in old_names]
+    new_count = len(new_files)
 
     status = "has_new" if new_count else "idle"
     db("""UPDATE distributions SET last_checked_at=datetime('now'), last_files_hash=?,
-          last_files_json=?, status=?, new_files_count=?, error_count=0, error_message=NULL
-          WHERE id=?""",
-       (new_hash, json.dumps(snapshot, ensure_ascii=False), status, new_count,
-        dist["id"]), write=True)
+          last_files_json=?, status=?, new_files_count=?, error_count=0, error_message=NULL WHERE id=?""",
+       (new_hash, json.dumps(snapshot, ensure_ascii=False), status, new_count, dist["id"]), write=True)
 
-    if new_count:
-        db("UPDATE distributions SET last_new_files_at=datetime('now') WHERE id=?",
-           (dist["id"],), write=True)
+    if new_count and old_hash:
+        db("UPDATE distributions SET last_new_files_at=datetime('now') WHERE id=?", (dist["id"]), write=True)
+        record_learning_samples(dist, new_files)
 
     if new_count > 0:
         trans = get_transmission_settings()
-        if (trans and trans.get("enabled") and
-            trans.get("auto_download_new_files") and
-            trans.get("action_on_new") != "notify_only"):
+        if (trans and trans.get("enabled") and trans.get("auto_download_new_files")
+                and trans.get("action_on_new") != "notify_only"):
             try:
                 torrent_data = await client.download_torrent(dist["torrent_id"], cookies)
                 download_dir = _resolve_download_dir(dist, trans)
                 paused = (trans.get("action_on_new") == "pause")
-
-                trans_client = build_transmission_client()
-                result = trans_client.add_torrent(torrent_data, download_dir, paused)
-
-                db("UPDATE distributions SET status='idle' WHERE id=?",
-                   (dist["id"],), write=True)
-                db("""INSERT INTO download_history
-                      (distribution_id, file_name, file_size, transmission_hash, sent_at)
-                      VALUES (?, ?, ?, ?, datetime('now'))""",
-                   (dist["id"], result["name"], result["size"], result["hash"]),
-                   write=True)
-
-                card_rows = db("SELECT title FROM titles WHERE external_id=?",
-                               (title_external_id,))
+                result = build_transmission_client().add_torrent(torrent_data, download_dir, paused)
+                db("UPDATE distributions SET status='idle' WHERE id=?", (dist["id"],), write=True)
+                db("""INSERT INTO download_history (distribution_id, file_name, file_size, transmission_hash, sent_at)
+                      VALUES (?,?,?,?,datetime('now'))""",
+                   (dist["id"], result["name"], result["size"], result["hash"]), write=True)
+                card_rows = db("SELECT title FROM titles WHERE external_id=?", (title_external_id,))
                 card_title = card_rows[0]["title"] if card_rows else title_external_id
                 await notify_torrent_started(card_title, result["name"], download_dir)
                 print(f"[dist-check] Auto-downloaded: {result['name']}")
@@ -2068,64 +2002,68 @@ async def check_distribution(title_external_id: str, sort: str = "date"):
     return RedirectResponse(f"/?sort={sort}&msg={msg_param}", status_code=303)
 
 
+# ── Stage 5: pattern routes ──────────────────────────
+@app.post("/distribution/pattern/save/{title_external_id}")
+async def save_pattern(title_external_id: str, min_samples: int = Form(3), sort: str = "date"):
+    dist = get_distribution(title_external_id)
+    if dist:
+        pat = ensure_pattern(dist["id"])
+        db("UPDATE distribution_patterns SET min_samples=? WHERE distribution_id=?",
+           (max(1, min(10, min_samples)), dist["id"]), write=True)
+        recompute_pattern(dist["id"])
+    return RedirectResponse(f"/?sort={sort}&msg=pattern-saved", status_code=303)
+
+
+@app.post("/distribution/pattern/reset/{title_external_id}")
+async def reset_pattern(title_external_id: str, sort: str = "date"):
+    dist = get_distribution(title_external_id)
+    if dist:
+        db("""UPDATE distribution_patterns SET samples_json='[]', median_delay_hours=NULL,
+              samples_count=0, confidence='low' WHERE distribution_id=?""",
+           (dist["id"],), write=True)
+    return RedirectResponse(f"/?sort={sort}&msg=pattern-reset", status_code=303)
+
+
 @app.post("/settings/tracker/test")
 async def test_tracker_login():
     creds = get_tracker_credentials("rutracker")
     if not creds:
-        print("[tracker-test] No credentials record")
         return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
-
     cookies = load_tracker_cookies("rutracker")
     username = creds.get("username", "")
     password = decrypt_value(creds.get("encrypted_password", "")) if creds.get("encrypted_password") else ""
-
     if not cookies and not (username and password):
-        print("[tracker-test] No cookies and no credentials")
         return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
 
     client = build_tracker_client("rutracker", cookies=cookies)
-
     if cookies:
-        print("[tracker-test] Validating saved cookies")
         is_valid, reason = await client.validate_cookies(cookies)
         if is_valid:
-            db("""UPDATE tracker_credentials SET last_login_at=datetime('now'),
-                  last_error=NULL, error_count=0 WHERE tracker_name='rutracker'""",
-               write=True)
+            db("UPDATE tracker_credentials SET last_login_at=datetime('now'), last_error=NULL, error_count=0 WHERE tracker_name='rutracker'", write=True)
             return RedirectResponse("/settings?msg=tracker-test-ok", status_code=303)
         else:
             if username and password:
                 print(f"[tracker-test] Cookies invalid ({reason}), attempting login")
             else:
-                db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name='rutracker'",
-                   (reason,), write=True)
+                db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name='rutracker'", (reason,), write=True)
                 return RedirectResponse("/settings?msg=tracker-cookies-invalid", status_code=303)
-
     try:
         new_cookies = await client.login()
-        db("""UPDATE tracker_credentials SET encrypted_cookies=?,
-              last_login_at=datetime('now'), last_error=NULL, error_count=0
-              WHERE tracker_name='rutracker'""",
+        db("UPDATE tracker_credentials SET encrypted_cookies=?, last_login_at=datetime('now'), last_error=NULL, error_count=0 WHERE tracker_name='rutracker'",
            (encrypt_value(json.dumps(new_cookies)),), write=True)
         return RedirectResponse("/settings?msg=tracker-test-ok", status_code=303)
     except RuTrackerCaptchaError:
-        db("UPDATE tracker_credentials SET last_error='captcha' WHERE tracker_name='rutracker'",
-           write=True)
+        db("UPDATE tracker_credentials SET last_error='captcha' WHERE tracker_name='rutracker'", write=True)
         return RedirectResponse("/settings?msg=tracker-captcha", status_code=303)
     except RuTrackerForbiddenError as e:
-        db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name='rutracker'",
-           (str(e),), write=True)
+        db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name='rutracker'", (str(e),), write=True)
         return RedirectResponse("/settings?msg=tracker-forbidden", status_code=303)
     except RuTrackerError as e:
-        print(f"[tracker-test] Login failed: {e}")
-        db("UPDATE tracker_credentials SET last_error=?, error_count=error_count+1 WHERE tracker_name='rutracker'",
-           (str(e),), write=True)
+        db("UPDATE tracker_credentials SET last_error=?, error_count=error_count+1 WHERE tracker_name='rutracker'", (str(e),), write=True)
         return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
     except Exception as e:
-        print(f"[tracker-test] Unexpected error: {type(e).__name__}: {e}")
         traceback.print_exc()
-        db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name='rutracker'",
-           (f"{type(e).__name__}: {e}",), write=True)
+        db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name='rutracker'", (f"{type(e).__name__}: {e}",), write=True)
         return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
 
 
@@ -2135,64 +2073,37 @@ async def download_distribution(title_external_id: str, sort: str = "date"):
     if not dist:
         set_setting("last_dist_download", "Раздача не найдена")
         return RedirectResponse(f"/?sort={sort}&msg=dist-download-fail", status_code=303)
-
     trans = get_transmission_settings()
     if not trans or not trans.get("enabled"):
         set_setting("last_dist_download", "Transmission отключён в настройках")
         return RedirectResponse(f"/?sort={sort}&msg=dist-download-fail", status_code=303)
-
     creds = get_tracker_credentials(dist["tracker_name"])
     if not creds or not creds.get("enabled"):
         set_setting("last_dist_download", "Трекер отключён в настройках")
         return RedirectResponse(f"/?sort={sort}&msg=dist-download-fail", status_code=303)
-
     cookies = load_tracker_cookies(dist["tracker_name"])
     if not cookies:
         set_setting("last_dist_download", "Не найдены cookies трекера")
         return RedirectResponse(f"/?sort={sort}&msg=dist-download-fail", status_code=303)
 
     tracker_client = build_tracker_client(dist["tracker_name"], cookies=cookies)
-
     try:
-        print(f"[download] Downloading .torrent for {dist['torrent_id']}")
         torrent_data = await tracker_client.download_torrent(dist["torrent_id"], cookies)
-        print(f"[download] Downloaded {len(torrent_data)} bytes")
-
         download_dir = _resolve_download_dir(dist, trans)
-        action = trans.get("action_on_new", "download")
-        paused = (action == "pause")
-
-        print(f"[download] Sending to Transmission: dir={download_dir}, paused={paused}")
-
-        trans_client = build_transmission_client()
-        result = trans_client.add_torrent(torrent_data, download_dir, paused)
-
-        db("UPDATE distributions SET status='idle', error_count=0, error_message=NULL WHERE id=?",
-           (dist["id"],), write=True)
-
-        db("""INSERT INTO download_history
-              (distribution_id, file_name, file_size, transmission_hash, sent_at)
-              VALUES (?, ?, ?, ?, datetime('now'))""",
-           (dist["id"], result["name"], result["size"], result["hash"]),
-           write=True)
-
-        card_rows = db("SELECT title FROM titles WHERE external_id=?",
-                       (title_external_id,))
+        paused = (trans.get("action_on_new") == "pause")
+        result = build_transmission_client().add_torrent(torrent_data, download_dir, paused)
+        db("UPDATE distributions SET status='idle', error_count=0, error_message=NULL WHERE id=?", (dist["id"],), write=True)
+        db("""INSERT INTO download_history (distribution_id, file_name, file_size, transmission_hash, sent_at)
+              VALUES (?,?,?,?,datetime('now'))""", (dist["id"], result["name"], result["size"], result["hash"]), write=True)
+        card_rows = db("SELECT title FROM titles WHERE external_id=?", (title_external_id,))
         card_title = card_rows[0]["title"] if card_rows else title_external_id
-
         await notify_torrent_started(card_title, result["name"], download_dir)
-
-        set_setting("last_dist_download",
-                    f"✅ Отправлено: {result['name']} ({format_size(result['size'])})")
+        set_setting("last_dist_download", f"✅ Отправлено: {result['name']} ({format_size(result['size'])})")
         return RedirectResponse(f"/?sort={sort}&msg=dist-downloaded", status_code=303)
-
     except Exception as e:
-        error_msg = str(e)
-        print(f"[download] Error: {type(e).__name__}: {error_msg}")
         traceback.print_exc()
-        db("UPDATE distributions SET status='error', error_message=?, error_count=error_count+1 WHERE id=?",
-           (error_msg, dist["id"]), write=True)
-        set_setting("last_dist_download", f"❌ Ошибка: {error_msg}")
+        db("UPDATE distributions SET status='error', error_message=?, error_count=error_count+1 WHERE id=?", (str(e), dist["id"]), write=True)
+        set_setting("last_dist_download", f"❌ Ошибка: {e}")
         return RedirectResponse(f"/?sort={sort}&msg=dist-download-fail", status_code=303)
 
 
@@ -2202,32 +2113,28 @@ async def test_transmission():
     if not trans or not trans.get("host"):
         return RedirectResponse("/settings?msg=transmission-test-fail", status_code=303)
     try:
-        trans_client = build_transmission_client()
-        ok, message = trans_client.test_connection()
+        ok, message = build_transmission_client().test_connection()
         set_setting("last_trans_test", message)
-        return RedirectResponse(
-            "/settings?msg=" + ("transmission-test-ok" if ok else "transmission-test-fail"),
-            status_code=303)
+        return RedirectResponse("/settings?msg=" + ("transmission-test-ok" if ok else "transmission-test-fail"), status_code=303)
     except Exception as e:
-        print(f"[transmission-test] Error: {e}")
         set_setting("last_trans_test", str(e))
         return RedirectResponse("/settings?msg=transmission-test-fail", status_code=303)
 
 
 # ── Routes ────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request, sort: str = "date",
-                err: str | None = None, msg: str | None = None):
+async def index(request: Request, sort: str = "date", err: str | None = None, msg: str | None = None):
     order = {
-        "date":  "release_date IS NULL, release_date",
+        "date": "release_date IS NULL, release_date",
         "title": "title COLLATE NOCASE",
         "genre": "genres IS NULL OR genres = '', genres COLLATE NOCASE, title COLLATE NOCASE",
     }.get(sort, "release_date IS NULL, release_date")
 
     rows = db(f"SELECT * FROM titles ORDER BY {order}")
-
     today = date.today()
     cards = []
+    patterns = {}
+
     for r in rows:
         c = dict(r)
         c["date_human"] = human_date(c["release_date"])
@@ -2250,13 +2157,10 @@ async def index(request: Request, sort: str = "date",
             next_s = get_next_season(c["external_id"])
             if next_s:
                 c["next_season_date_human"] = human_date(next_s["release_date"])
-                c["next_season_number"] = next_s["season_number"]
                 c["display_poster"] = next_s.get("poster_url") or c["poster_url"]
             else:
                 c["next_season_date_human"] = None
-                c["next_season_number"] = None
                 c["display_poster"] = c["poster_url"]
-
             w, t = get_show_progress(c["external_id"])
             c["watch_label"] = f"{w}/{t}" if t > 0 else None
             c["watch_percent"] = progress_percent(w, t)
@@ -2275,6 +2179,18 @@ async def index(request: Request, sort: str = "date",
             c["distribution_mode"] = dist["mode"]
             c["distribution_check_interval_hours"] = dist["check_interval_hours"]
 
+            pat = get_pattern(dist["id"])
+            if pat:
+                samples = json.loads(pat["samples_json"] or "[]")
+                patterns[c["external_id"]] = {
+                    "median": pat["median_delay_hours"],
+                    "count": pat["samples_count"],
+                    "confidence": pat["confidence"],
+                    "min_samples": pat["min_samples"] or 3,
+                    "samples": [{"s": s.get("season"), "e": s.get("episode"),
+                                 "d": s.get("delay_hours")} for s in samples[-5:]],
+                }
+
         cards.append(c)
 
     success_messages = {
@@ -2285,6 +2201,8 @@ async def index(request: Request, sort: str = "date",
         "dist-removed": "Раздача удалена.",
         "dist-checked": get_setting("last_dist_check") or "Проверка выполнена.",
         "dist-downloaded": get_setting("last_dist_download") or "Торрент отправлен в Transmission.",
+        "pattern-saved": "Настройки обучения сохранены.",
+        "pattern-reset": "Обучение сброшено.",
     }
     error_messages = {
         "dist-exists": "Раздача уже добавлена к этой карточке.",
@@ -2293,31 +2211,23 @@ async def index(request: Request, sort: str = "date",
         "dist-download-fail": get_setting("last_dist_download") or "Ошибка скачивания.",
     }
 
-    return templates.TemplateResponse(
-        request, "index.html", {
-            "cards": cards, "sort": sort,
-            "error": "Ничего не нашлось — уточните название." if err else None,
-            "message": success_messages.get(msg),
-            "error_message": error_messages.get(msg),
-        })
+    return templates.TemplateResponse(request, "index.html", {
+        "cards": cards, "sort": sort,
+        "patterns_json": json.dumps(patterns, ensure_ascii=False),
+        "error": "Ничего не нашлось — уточните название." if err else None,
+        "message": success_messages.get(msg),
+        "error_message": error_messages.get(msg),
+    })
 
 
 @app.get("/new", response_class=HTMLResponse)
 async def new_card_page(request: Request, msg: str | None = None):
-    success_messages = {
-        "added-local": "Карточка добавлена локально.",
-        "added": "Карточка добавлена.",
-    }
-    error_messages = {
-        "search-fail": "Не удалось получить данные по выбранной карточке.",
-    }
-    return templates.TemplateResponse(
-        request, "add.html", {
-            "sources": list(SOURCES.keys()),
-            "default_source": request.cookies.get("source", "tmdb"),
-            "message": success_messages.get(msg),
-            "error_message": error_messages.get(msg),
-        })
+    return templates.TemplateResponse(request, "add.html", {
+        "sources": list(SOURCES.keys()),
+        "default_source": request.cookies.get("source", "tmdb"),
+        "message": {"added-local": "Карточка добавлена локально.", "added": "Карточка добавлена."}.get(msg),
+        "error_message": {"search-fail": "Не удалось получить данные по выбранной карточке."}.get(msg),
+    })
 
 
 @app.post("/search")
@@ -2335,21 +2245,17 @@ async def search(query: str = Form(...), source: str = Form("tmdb")):
 
 
 @app.post("/add")
-async def add_local(title: str = Form(...),
-                    release_date: str | None = Form(None)):
+async def add_local(title: str = Form(...), release_date: str | None = Form(None)):
     local_id = f"local:{uuid.uuid4().hex[:12]}"
-    db("""INSERT INTO titles
-          (external_id, title, type, release_date, poster_url, genres, source, updated_at)
+    db("""INSERT INTO titles (external_id, title, type, release_date, poster_url, genres, source, updated_at)
           VALUES (?,?,?,?,?,?,?,datetime('now'))""",
-       (local_id, title.strip(), None, release_date or None, None, "", "local"),
-       write=True)
+       (local_id, title.strip(), None, release_date or None, None, "", "local"), write=True)
     await notify_new_card(title.strip(), release_date, "local", None)
     return RedirectResponse("/new?msg=added-local", status_code=303)
 
 
 @app.post("/add-select")
-async def add_select(external_id: str = Form(...),
-                     source: str = Form("tmdb"),
+async def add_select(external_id: str = Form(...), source: str = Form("tmdb"),
                      release_date: str | None = Form(None)):
     src = SOURCES.get(source)
     if not src:
@@ -2364,12 +2270,9 @@ async def add_select(external_id: str = Form(...),
 
     rd = info["release_date"] or release_date or None
     poster_local = await download_card_poster(info)
-
-    db("""INSERT OR REPLACE INTO titles
-          (external_id, title, type, release_date, poster_url, genres, source, updated_at)
+    db("""INSERT OR REPLACE INTO titles (external_id, title, type, release_date, poster_url, genres, source, updated_at)
           VALUES (?,?,?,?,?,?,?,datetime('now'))""",
-       (info["external_id"], info["title"], info["type"], rd,
-        poster_local, info["genres"], src.name), write=True)
+       (info["external_id"], info["title"], info["type"], rd, poster_local, info["genres"], src.name), write=True)
 
     if info["type"] == "series" and src.name == "tmdb":
         tmdb_id = parse_tmdb_id(info["external_id"])
@@ -2415,22 +2318,14 @@ async def refresh_card(external_id: str, sort: str = "date"):
 async def settings_page(request: Request, msg: str | None = None):
     s = get_telegram_settings()
     log_rows = db("SELECT * FROM updates_log ORDER BY created_at DESC LIMIT 200")
-    proxy_url = get_setting("proxy_url", "") or ""
-    theme = get_setting("theme", "dark")
-    trans = get_transmission_settings()
     tracker = get_tracker_credentials("rutracker")
-
-    tracker_has_cookies = False
-    if tracker and tracker.get("encrypted_cookies"):
-        tracker_has_cookies = bool(decrypt_value(tracker["encrypted_cookies"]))
+    tracker_has_cookies = bool(tracker and tracker.get("encrypted_cookies")
+                               and decrypt_value(tracker["encrypted_cookies"]))
 
     success_messages = {
-        "refresh-saved": "Период обновления сохранён.",
-        "telegram-saved": "Настройки Telegram сохранены.",
-        "proxy-saved": "Настройки прокси сохранены.",
-        "proxy-ok": "Прокси работает! Соединение установлено.",
-        "theme-saved": "Тема сохранена.",
-        "test-ok": "Тестовое сообщение отправлено!",
+        "refresh-saved": "Период обновления сохранён.", "telegram-saved": "Настройки Telegram сохранены.",
+        "proxy-saved": "Настройки прокси сохранены.", "proxy-ok": "Прокси работает! Соединение установлено.",
+        "theme-saved": "Тема сохранена.", "test-ok": "Тестовое сообщение отправлено!",
         "restore-ok": "Восстановление завершено. Данные заменены из бэкапа.",
         "transmission-saved": "Настройки Transmission сохранены.",
         "transmission-test-ok": get_setting("last_trans_test") or "Transmission подключён.",
@@ -2452,20 +2347,16 @@ async def settings_page(request: Request, msg: str | None = None):
         "tracker-cookies-invalid": "Cookies невалидны. Скопируйте свежие из браузера.",
     }
 
-    return templates.TemplateResponse(
-        request, "settings.html", {
-            "tg": s,
-            "refresh_hours": get_refresh_hours(),
-            "refresh_label": refresh_period_label(get_refresh_hours()),
-            "log_rows": [dict(r) for r in log_rows],
-            "proxy_url": proxy_url,
-            "theme": theme,
-            "trans": trans,
-            "tracker": tracker,
-            "tracker_has_cookies": tracker_has_cookies,
-            "message": success_messages.get(msg),
-            "error_message": error_messages.get(msg),
-        })
+    return templates.TemplateResponse(request, "settings.html", {
+        "tg": s, "refresh_hours": get_refresh_hours(),
+        "refresh_label": refresh_period_label(get_refresh_hours()),
+        "log_rows": [dict(r) for r in log_rows],
+        "proxy_url": get_setting("proxy_url", "") or "",
+        "theme": get_setting("theme", "dark"),
+        "trans": get_transmission_settings(),
+        "tracker": tracker, "tracker_has_cookies": tracker_has_cookies,
+        "message": success_messages.get(msg), "error_message": error_messages.get(msg),
+    })
 
 
 @app.post("/settings/refresh")
@@ -2473,7 +2364,6 @@ async def set_refresh_interval(hours: int = Form(...)):
     hours = max(1, min(168, hours))
     set_setting("refresh_hours", str(hours))
     scheduler.reschedule_job("refresh", trigger="interval", hours=hours)
-    print(f"[settings] Refresh interval changed to {hours}h")
     return RedirectResponse("/settings?msg=refresh-saved", status_code=303)
 
 
@@ -2488,7 +2378,6 @@ async def save_theme(theme: str = Form("dark")):
 @app.post("/settings/proxy")
 async def save_proxy(proxy_url: str = Form("")):
     set_setting("proxy_url", proxy_url.strip())
-    print(f"[settings] Proxy URL set: {proxy_url.strip() or '(none)'}")
     return RedirectResponse("/settings?msg=proxy-saved", status_code=303)
 
 
@@ -2499,9 +2388,7 @@ async def test_proxy():
         return RedirectResponse("/settings?msg=proxy-not-set", status_code=303)
     try:
         async with httpx.AsyncClient(proxy=proxy, timeout=10) as client:
-            r = await client.get("https://www.omdbapi.com/",
-                                 params={"apikey": "test", "t": "test"})
-            print(f"[proxy] Test succeeded, status={r.status_code}")
+            r = await client.get("https://www.omdbapi.com/", params={"apikey": "test", "t": "test"})
             return RedirectResponse("/settings?msg=proxy-ok", status_code=303)
     except Exception as e:
         print(f"[proxy] Test failed: {e}")
@@ -2509,25 +2396,15 @@ async def test_proxy():
 
 
 @app.post("/settings/telegram")
-async def save_telegram(bot_token: str = Form(""),
-                        chat_id: str = Form(""),
-                        enabled: str = Form("off"),
-                        send_time: str = Form("09:00"),
-                        notify_days: int = Form(1),
-                        notify_date_changes: str = Form("off"),
-                        notify_new_cards: str = Form("off"),
-                        notify_new_seasons: str = Form("off"),
-                        notify_new_episodes: str = Form("off"),
-                        notify_torrent_started: str = Form("off"),
-                        notify_torrent_completed: str = Form("off")):
-    save_telegram_settings(bot_token.strip(), chat_id.strip(),
-                           enabled == "on", send_time, notify_days,
-                           notify_date_changes == "on",
-                           notify_new_cards == "on",
-                           notify_new_seasons == "on",
-                           notify_new_episodes == "on",
-                           notify_torrent_started == "on",
-                           notify_torrent_completed == "on")
+async def save_telegram(bot_token: str = Form(""), chat_id: str = Form(""), enabled: str = Form("off"),
+                        send_time: str = Form("09:00"), notify_days: int = Form(1),
+                        notify_date_changes: str = Form("off"), notify_new_cards: str = Form("off"),
+                        notify_new_seasons: str = Form("off"), notify_new_episodes: str = Form("off"),
+                        notify_torrent_started: str = Form("off"), notify_torrent_completed: str = Form("off")):
+    save_telegram_settings(bot_token.strip(), chat_id.strip(), enabled == "on", send_time, notify_days,
+                           notify_date_changes == "on", notify_new_cards == "on",
+                           notify_new_seasons == "on", notify_new_episodes == "on",
+                           notify_torrent_started == "on", notify_torrent_completed == "on")
     schedule_telegram_job()
     return RedirectResponse("/settings?msg=telegram-saved", status_code=303)
 
@@ -2537,97 +2414,62 @@ async def telegram_test(test_type: str):
     s = get_telegram_settings()
     if not s.get("bot_token") or not s.get("chat_id"):
         return RedirectResponse("/settings?msg=test-fail", status_code=303)
-
     today = date.today()
     ok = True
-
     if test_type == "simple":
         ok = await send_telegram("🎬 <b>Тестовое сообщение</b>\nВсё работает!")
     elif test_type == "date-change":
-        await notify_date_changes([{
-            "title": "Тестовый фильм",
-            "old_date": (today + timedelta(days=10)).isoformat(),
-            "new_date": (today + timedelta(days=15)).isoformat(),
-        }], force=True)
+        await notify_date_changes([{"title": "Тестовый фильм",
+                                    "old_date": (today + timedelta(days=10)).isoformat(),
+                                    "new_date": (today + timedelta(days=15)).isoformat()}], force=True)
     elif test_type == "new-card":
-        await notify_new_card("Тестовый фильм",
-                              (today + timedelta(days=30)).isoformat(),
-                              "tmdb", "movie", force=True)
+        await notify_new_card("Тестовый фильм", (today + timedelta(days=30)).isoformat(), "tmdb", "movie", force=True)
     elif test_type == "new-season":
-        await notify_new_season("Тестовый сериал", 2,
-                                (today + timedelta(days=20)).isoformat(),
-                                force=True)
+        await notify_new_season("Тестовый сериал", 2, (today + timedelta(days=20)).isoformat(), force=True)
     elif test_type == "new-episodes":
-        await notify_new_episodes("Тестовый сериал", [
-            {"season_number": 1, "episode_number": 5,
-             "name": "Тестовый эпизод",
-             "release_date": today.isoformat()},
-        ], force=True)
+        await notify_new_episodes("Тестовый сериал",
+                                  [{"season_number": 1, "episode_number": 5, "name": "Тестовый эпизод",
+                                    "release_date": today.isoformat()}], force=True)
     elif test_type == "torrent-started":
-        await notify_torrent_started("Тестовый сериал",
-                                     "Тестовый.сериал.S01E01.1080p.mkv",
-                                     "/media/series", force=True)
+        await notify_torrent_started("Тестовый сериал", "Тестовый.сериал.S01E01.1080p.mkv", "/media/series", force=True)
     elif test_type == "torrent-completed":
-        await notify_torrent_completed("Тестовый сериал",
-                                       "Тестовый.сериал.S01E01.1080p.mkv",
-                                       2 * 1024 * 1024 * 1024, force=True)
+        await notify_torrent_completed("Тестовый сериал", "Тестовый.сериал.S01E01.1080p.mkv", 2 * 1024 ** 3, force=True)
     elif test_type == "daily":
         await check_and_notify(force=True)
     else:
         return RedirectResponse("/settings?msg=test-fail", status_code=303)
-
-    msg = "test-ok" if ok else "test-fail"
-    return RedirectResponse(f"/settings?msg={msg}", status_code=303)
+    return RedirectResponse(f"/settings?msg={'test-ok' if ok else 'test-fail'}", status_code=303)
 
 
 @app.post("/settings/transmission")
-async def save_transmission(host: str = Form("localhost"),
-                            port: int = Form(9091),
-                            username: str = Form(""),
-                            password: str = Form(""),
-                            enabled: str = Form("off"),
-                            base_download_dir: str = Form(""),
-                            action_on_new: str = Form("download"),
-                            filter_recent_only: str = Form("off"),
-                            min_file_size_mb: int = Form(500),
-                            default_check_interval: int = Form(6),
+async def save_transmission(host: str = Form("localhost"), port: int = Form(9091), username: str = Form(""),
+                            password: str = Form(""), enabled: str = Form("off"), base_download_dir: str = Form(""),
+                            action_on_new: str = Form("download"), filter_recent_only: str = Form("off"),
+                            min_file_size_mb: int = Form(500), default_check_interval: int = Form(6),
                             default_download_behavior: str = Form("use_distribution_path"),
-                            auto_download_new_files: str = Form("off"),
-                            auto_check_enabled: str = Form("off"),
+                            auto_download_new_files: str = Form("off"), auto_check_enabled: str = Form("off"),
                             auto_check_tick_minutes: int = Form(10)):
     if action_on_new not in ("download", "pause", "notify_only"):
         action_on_new = "download"
     if default_download_behavior not in ("use_distribution_path", "use_base_dir"):
         default_download_behavior = "use_distribution_path"
-
-    db("""UPDATE transmission_settings SET
-            host=?, port=?, username=?, encrypted_password=?, enabled=?,
-            base_download_dir=?, action_on_new=?, filter_recent_only=?,
-            min_file_size_mb=?, default_check_interval=?,
-            default_download_behavior=?, auto_download_new_files=?,
-            auto_check_enabled=?, auto_check_tick_minutes=?
+    db("""UPDATE transmission_settings SET host=?, port=?, username=?, encrypted_password=?, enabled=?,
+            base_download_dir=?, action_on_new=?, filter_recent_only=?, min_file_size_mb=?, default_check_interval=?,
+            default_download_behavior=?, auto_download_new_files=?, auto_check_enabled=?, auto_check_tick_minutes=?
           WHERE id=1""",
-       (host.strip(), port, username.strip(), encrypt_value(password.strip()),
-        1 if enabled == "on" else 0, base_download_dir.strip(), action_on_new,
-        1 if filter_recent_only == "on" else 0,
-        max(1, min_file_size_mb), max(1, min(168, default_check_interval)),
-        default_download_behavior,
-        1 if auto_download_new_files == "on" else 0,
-        1 if auto_check_enabled == "on" else 0,
-        max(5, min(60, auto_check_tick_minutes))),
-       write=True)
-
+       (host.strip(), port, username.strip(), encrypt_value(password.strip()), 1 if enabled == "on" else 0,
+        base_download_dir.strip(), action_on_new, 1 if filter_recent_only == "on" else 0,
+        max(1, min_file_size_mb), max(1, min(168, default_check_interval)), default_download_behavior,
+        1 if auto_download_new_files == "on" else 0, 1 if auto_check_enabled == "on" else 0,
+        max(5, min(60, auto_check_tick_minutes))), write=True)
     schedule_distribution_job()
     return RedirectResponse("/settings?msg=transmission-saved", status_code=303)
 
 
 @app.post("/settings/tracker")
-async def save_tracker(tracker_name: str = Form("rutracker"),
-                       username: str = Form(""),
-                       password: str = Form(""),
-                       cookies_manual: str = Form(""),
-                       user_agent: str = Form(""),
-                       enabled: str = Form("off")):
+async def save_tracker(tracker_name: str = Form("rutracker"), username: str = Form(""),
+                       password: str = Form(""), cookies_manual: str = Form(""),
+                       user_agent: str = Form(""), enabled: str = Form("off")):
     enabled_val = 1 if enabled == "on" else 0
     encrypted_pwd = encrypt_value(password.strip()) if password else ""
     ua_val = user_agent.strip()
@@ -2640,33 +2482,22 @@ async def save_tracker(tracker_name: str = Form("rutracker"),
                 if "=" in pair:
                     name, value = pair.split("=", 1)
                     cookies_dict[name.strip()] = value.strip()
-
             if not cookies_dict:
                 return RedirectResponse("/settings?msg=tracker-cookies-invalid", status_code=303)
-
             db("""INSERT OR REPLACE INTO tracker_credentials
                   (tracker_name, username, encrypted_password, encrypted_cookies, user_agent, enabled)
                   VALUES (?,?,?,?,?,?)""",
                (tracker_name, username.strip(), encrypted_pwd,
-                encrypt_value(json.dumps(cookies_dict)), ua_val, enabled_val),
-               write=True)
-
-            client = RuTrackerClient(
-                username=username.strip(),
-                password=password.strip(),
-                proxy=get_proxy_url(),
-                cookies=cookies_dict,
-                user_agent=ua_val)
+                encrypt_value(json.dumps(cookies_dict)), ua_val, enabled_val), write=True)
+            client = RuTrackerClient(username=username.strip(), password=password.strip(),
+                                     proxy=get_proxy_url(), cookies=cookies_dict, user_agent=ua_val)
             is_valid, reason = await client.validate_cookies(cookies_dict)
             if is_valid:
                 db("UPDATE tracker_credentials SET last_login_at=datetime('now'), last_error=NULL WHERE tracker_name=?",
                    (tracker_name,), write=True)
-                print(f"[tracker] Cookies saved and validated ({len(cookies_dict)} keys)")
                 return RedirectResponse("/settings?msg=tracker-cookies-saved", status_code=303)
             else:
-                db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name=?",
-                   (reason,), write=True)
-                print(f"[tracker] Cookies saved but validation failed: {reason}")
+                db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name=?", (reason,), write=True)
                 return RedirectResponse("/settings?msg=tracker-cookies-invalid", status_code=303)
         except Exception as e:
             print(f"[tracker] Error parsing cookies: {e}")
@@ -2677,68 +2508,50 @@ async def save_tracker(tracker_name: str = Form("rutracker"),
     db("""INSERT OR REPLACE INTO tracker_credentials
           (tracker_name, username, encrypted_password, encrypted_cookies, user_agent, enabled)
           VALUES (?,?,?,?,?,?)""",
-       (tracker_name, username.strip(), encrypted_pwd, existing_cookies,
-        ua_val, enabled_val),
-       write=True)
+       (tracker_name, username.strip(), encrypted_pwd, existing_cookies, ua_val, enabled_val), write=True)
     return RedirectResponse("/settings?msg=tracker-saved", status_code=303)
 
 
 @app.post("/distribution/add")
-async def add_distribution(title_external_id: str = Form(...),
-                           url: str = Form(...),
-                           download_path: str = Form(""),
-                           mode: str = Form("smart"),
+async def add_distribution(title_external_id: str = Form(...), url: str = Form(...),
+                           download_path: str = Form(""), mode: str = Form("smart"),
                            check_interval_hours: int = Form(6)):
     existing = get_distribution(title_external_id)
     torrent_id = parse_torrent_id(url)
-
     if not torrent_id:
         return RedirectResponse("/?msg=dist-invalid-url", status_code=303)
-
     if mode not in ("smart", "fixed"):
         mode = "smart"
 
     if existing:
-        db("""UPDATE distributions SET
-                tracker_name='rutracker', torrent_id=?, url=?, download_path=?,
-                mode=?, check_interval_hours=?, status='idle',
-                last_checked_at=NULL, last_files_hash=NULL, last_files_json=NULL,
-                new_files_count=0, error_message=NULL, error_count=0
+        db("""UPDATE distributions SET tracker_name='rutracker', torrent_id=?, url=?, download_path=?,
+                mode=?, check_interval_hours=?, status='idle', last_checked_at=NULL, last_files_hash=NULL,
+                last_files_json=NULL, new_files_count=0, error_message=NULL, error_count=0
               WHERE title_external_id=?""",
-           (torrent_id, url.strip(), download_path.strip(),
-            mode, max(1, min(168, check_interval_hours)), title_external_id),
-           write=True)
+           (torrent_id, url.strip(), download_path.strip(), mode,
+            max(1, min(168, check_interval_hours)), title_external_id), write=True)
         update_next_episode_air_date(title_external_id)
         return RedirectResponse("/?msg=dist-updated", status_code=303)
     else:
-        db("""INSERT INTO distributions
-              (title_external_id, tracker_name, torrent_id, url, download_path,
-               mode, check_interval_hours, status)
-              VALUES (?, 'rutracker', ?, ?, ?, ?, ?, 'idle')""",
+        db("""INSERT INTO distributions (title_external_id, tracker_name, torrent_id, url, download_path,
+                mode, check_interval_hours, status) VALUES (?, 'rutracker', ?, ?, ?, ?, ?, 'idle')""",
            (title_external_id, torrent_id, url.strip(), download_path.strip(),
-            mode, max(1, min(168, check_interval_hours))),
-           write=True)
+            mode, max(1, min(168, check_interval_hours))), write=True)
         update_next_episode_air_date(title_external_id)
         return RedirectResponse("/?msg=dist-added", status_code=303)
 
 
 @app.post("/distribution/remove/{title_external_id}")
 async def remove_distribution(title_external_id: str, sort: str = "date"):
-    db("DELETE FROM distributions WHERE title_external_id=?",
-       (title_external_id,), write=True)
+    db("DELETE FROM distributions WHERE title_external_id=?", (title_external_id,), write=True)
     return RedirectResponse(f"/?sort={sort}&msg=dist-removed", status_code=303)
 
 
 @app.get("/export.ics")
 async def export_ics():
-    rows = db("SELECT * FROM titles")
-    cards = [dict(r) for r in rows]
-    content = build_ics(cards)
-    return Response(
-        content=content,
-        media_type="text/calendar; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=movie-radar.ics"}
-    )
+    return Response(content=build_ics([dict(r) for r in db("SELECT * FROM titles")]),
+                    media_type="text/calendar; charset=utf-8",
+                    headers={"Content-Disposition": "attachment; filename=movie-radar.ics"})
 
 
 @app.post("/delete/{external_id}")
@@ -2752,17 +2565,14 @@ async def delete(external_id: str, sort: str = "date"):
 
 @app.post("/toggle-notify/{external_id}")
 async def toggle_notify(external_id: str, sort: str = "date"):
-    db("""UPDATE titles
-          SET notify_enabled = CASE WHEN notify_enabled = 1 THEN 0 ELSE 1 END
-          WHERE external_id = ?""",
+    db("UPDATE titles SET notify_enabled = CASE WHEN notify_enabled = 1 THEN 0 ELSE 1 END WHERE external_id = ?",
        (external_id,), write=True)
     return RedirectResponse(f"/?sort={sort}", status_code=303)
 
 
 @app.post("/notify-all/{state}")
 async def notify_all(state: str, sort: str = "date"):
-    val = 1 if state == "on" else 0
-    db("UPDATE titles SET notify_enabled = ?", (val,), write=True)
+    db("UPDATE titles SET notify_enabled = ?", (1 if state == "on" else 0,), write=True)
     return RedirectResponse(f"/?sort={sort}", status_code=303)
 
 
@@ -2773,32 +2583,21 @@ async def title_page(request: Request, external_id: str):
         return RedirectResponse("/", status_code=303)
     card = dict(rows[0])
     card["date_human"] = human_date(card["release_date"])
-
-    seasons = db("""SELECT * FROM seasons WHERE title_external_id=?
-                    ORDER BY season_number""", (external_id,))
+    seasons = db("SELECT * FROM seasons WHERE title_external_id=? ORDER BY season_number", (external_id,))
     season_list = []
     for s in seasons:
         sd = dict(s)
         sd["date_human"] = human_date(sd["release_date"])
         w, t = get_season_progress(external_id, sd["season_number"])
-        sd["watched_count"] = w
-        sd["total_count"] = t
-        sd["percent"] = progress_percent(w, t)
+        sd.update(watched_count=w, total_count=t, percent=progress_percent(w, t))
         season_list.append(sd)
-
     card["poster_url"] = ensure_proxied(card.get("poster_url"))
     for sd in season_list:
         sd["poster_url"] = ensure_proxied(sd.get("poster_url"))
-
     show_watched, show_total = get_show_progress(external_id)
-
     return templates.TemplateResponse(request, "title.html", {
-        "card": card,
-        "seasons": season_list,
-        "show_watched": show_watched,
-        "show_total": show_total,
-        "show_percent": progress_percent(show_watched, show_total),
-    })
+        "card": card, "seasons": season_list, "show_watched": show_watched,
+        "show_total": show_total, "show_percent": progress_percent(show_watched, show_total)})
 
 
 @app.post("/title/{external_id}/refresh-seasons")
@@ -2815,26 +2614,19 @@ async def refresh_seasons(external_id: str):
                 seasons = await src.fetch_seasons(tmdb_id)
                 new_seasons = await save_seasons(external_id, seasons)
                 await asyncio.sleep(0.5)
-
                 for ns in new_seasons:
-                    await notify_new_season(card["title"], ns["season_number"],
-                                            ns["release_date"])
-
+                    await notify_new_season(card["title"], ns["season_number"], ns["release_date"])
                 new_episodes_all = []
                 for season in seasons:
                     try:
                         episodes = await src.fetch_episodes(tmdb_id, season["season_number"])
-                        new_eps = await save_episodes(external_id, season["season_number"], episodes)
-                        new_episodes_all.extend(new_eps)
+                        new_episodes_all.extend(await save_episodes(external_id, season["season_number"], episodes))
                         await asyncio.sleep(0.5)
                     except Exception as e:
-                        print(f"[seasons] Error fetching episodes: {e}")
-
+                        print(f"[seasons] Error: {e}")
                 if new_episodes_all:
                     await notify_new_episodes(card["title"], new_episodes_all)
-
                 update_next_episode_air_date(external_id)
-                print(f"[seasons] Refreshed {len(seasons)} seasons for {card['title']}")
             except Exception as e:
                 print(f"[seasons] Error: {e}")
     return RedirectResponse(f"/title/{external_id}", status_code=303)
@@ -2846,48 +2638,34 @@ async def season_page(request: Request, external_id: str, season_number: int):
     if not rows:
         return RedirectResponse("/", status_code=303)
     card = dict(rows[0])
-
-    srows = db("SELECT * FROM seasons WHERE title_external_id=? AND season_number=?",
-               (external_id, season_number))
+    srows = db("SELECT * FROM seasons WHERE title_external_id=? AND season_number=?", (external_id, season_number))
     if not srows:
         return RedirectResponse(f"/title/{external_id}", status_code=303)
     season = dict(srows[0])
     season["date_human"] = human_date(season["release_date"])
-
     watched_set = get_watched_set(external_id, season_number)
-
-    erows = db("SELECT * FROM episodes WHERE season_id=? ORDER BY episode_number",
-               (season["id"],))
     episodes = []
-    for e in erows:
+    for e in db("SELECT * FROM episodes WHERE season_id=? ORDER BY episode_number", (season["id"],)):
         ed = dict(e)
         ed["date_human"] = human_date(ed["release_date"])
         ed["watched"] = ed["episode_number"] in watched_set
         ed["poster_url"] = ensure_proxied(ed.get("poster_url"))
         episodes.append(ed)
-
     watched_count, total_count = get_season_progress(external_id, season_number)
-
     return templates.TemplateResponse(request, "season.html", {
-        "card": card,
-        "season": season,
-        "episodes": episodes,
-        "watched_count": watched_count,
-        "total_count": total_count,
+        "card": card, "season": season, "episodes": episodes,
+        "watched_count": watched_count, "total_count": total_count,
         "percent": progress_percent(watched_count, total_count),
-        "all_watched": total_count > 0 and watched_count == total_count,
-    })
+        "all_watched": total_count > 0 and watched_count == total_count})
 
 
 @app.post("/watch/{external_id}/{season_number}/{episode_number}")
 async def watch_episode(external_id: str, season_number: int, episode_number: int):
     toggle_watched(external_id, season_number, episode_number)
-    return RedirectResponse(f"/title/{external_id}/season/{season_number}",
-                            status_code=303)
+    return RedirectResponse(f"/title/{external_id}/season/{season_number}", status_code=303)
 
 
 @app.post("/watch-season/{external_id}/{season_number}")
 async def watch_season(external_id: str, season_number: int):
     toggle_season_watched(external_id, season_number)
-    return RedirectResponse(f"/title/{external_id}/season/{season_number}",
-                            status_code=303)
+    return RedirectResponse(f"/title/{external_id}/season/{season_number}", status_code=303)
