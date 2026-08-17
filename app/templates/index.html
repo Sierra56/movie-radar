@@ -251,6 +251,7 @@
         color: #3ddc84;
     }
 
+    /* Добавить = фиолетовый; Изменить = цвет по статусу */
     .btn-dist-add {
         border-color: #b07ce8;
         color: #b07ce8;
@@ -493,14 +494,20 @@
                 <button class="btn-full btn-red" type="submit">🗑 Удалить</button>
             </form>
 
+            {# Кнопка раздачи: данные в data-*, клик через делегирование #}
             {% if c.has_distribution %}
-            <button class="btn-full btn-dist-{{ c.distribution_status }}" type="button"
-                title="Статус раздачи: {{ c.distribution_status }}" onclick="openDistModal('{{ c.external_id }}')">
+            <button class="btn-full btn-dist-{{ c.distribution_status }} js-dist-btn" type="button"
+                title="Статус: {{ c.distribution_status }}" data-id="{{ c.external_id }}" data-title="{{ c.title|e }}"
+                data-has="true" data-url="{{ (c.distribution_url or '')|e }}"
+                data-path="{{ (c.distribution_download_path or '')|e }}"
+                data-mode="{{ (c.distribution_mode or 'smart')|e }}"
+                data-interval="{{ c.distribution_check_interval_hours or 6 }}">
                 🎬 Изменить раздачу{% if c.distribution_status == 'has_new' and c.new_count %}<span
                     class="count-badge">{{ c.new_count }}</span>{% endif %}
             </button>
             {% else %}
-            <button class="btn-full btn-dist-add" type="button" onclick="openDistModal('{{ c.external_id }}')">
+            <button class="btn-full btn-dist-add js-dist-btn" type="button" data-id="{{ c.external_id }}"
+                data-title="{{ c.title|e }}" data-has="false">
                 🎬 Добавить раздачу
             </button>
             {% endif %}
@@ -512,7 +519,7 @@
             </form>
 
             <form method="post" action="/distribution/download/{{ c.external_id }}?sort={{ sort }}"
-                onsubmit="return confirmDownload('{{ c.external_id }}')">
+                class="js-download-form" data-title="{{ c.title|e }}">
                 <button class="btn-full btn-green" type="submit" {% if not c.has_distribution %}disabled{% endif %}>
                     ⬇ Скачать торрент
                 </button>
@@ -536,7 +543,7 @@
     <div class="modal">
         <div class="modal-header">
             <h3 id="dist-modal-title">Добавить раздачу</h3>
-            <button class="modal-close" onclick="closeDistModal()">×</button>
+            <button class="modal-close" id="dist-modal-close">×</button>
         </div>
         <div class="modal-body">
             <form method="post" action="/distribution/add" id="dist-form">
@@ -568,7 +575,7 @@
                 </div>
                 <div class="modal-actions">
                     <button type="submit">Сохранить</button>
-                    <button type="button" class="secondary" onclick="closeDistModal()">Отмена</button>
+                    <button type="button" class="secondary" id="dist-modal-cancel">Отмена</button>
                 </div>
             </form>
         </div>
@@ -600,34 +607,25 @@
     }
     pollProgress();
 
-    // Данные карточек и раздач (tojson = безопасное экранирование)
-    const cardsData = {
-  {% for c in cards %}
-    "{{ c.external_id }}": {
-        "title": { { c.title | tojson } },
-        "has": { { c.has_distribution | tojson } },
-        "url": { { (c.distribution_url or '') | tojson } },
-        "download_path": { { (c.distribution_download_path or '') | tojson } },
-        "mode": { { (c.distribution_mode or 'smart') | tojson } },
-        "check_interval_hours": { { c.distribution_check_interval_hours or 6 } }
-    },
-    {% endfor %}
-};
+    // ── Модальное окно раздачи (делегирование, без inline onclick) ──
+    const distModal = document.getElementById('dist-modal');
 
-    function openDistModal(id) {
-        const d = cardsData[id];
-        if (!d) return;
+    function openDistModal(btn) {
+        const id = btn.dataset.id;
+        const title = btn.dataset.title || '';
+        const has = btn.dataset.has === 'true';
 
         document.getElementById('dist-title-id').value = id;
         document.getElementById('dist-modal-title').textContent =
-            (d.has ? 'Изменить раздачу: ' : 'Добавить раздачу: ') + d.title;
+            (has ? 'Изменить раздачу: ' : 'Добавить раздачу: ') + title;
 
-        if (d.has) {
-            document.getElementById('dist-url').value = d.url || '';
-            document.getElementById('dist-path').value = d.download_path || '';
-            const modeInput = document.querySelector(`input[name="mode"][value="${d.mode}"]`);
+        if (has) {
+            document.getElementById('dist-url').value = btn.dataset.url || '';
+            document.getElementById('dist-path').value = btn.dataset.path || '';
+            const mode = btn.dataset.mode || 'smart';
+            const modeInput = document.querySelector(`input[name="mode"][value="${mode}"]`);
             if (modeInput) modeInput.checked = true;
-            document.getElementById('dist-interval').value = d.check_interval_hours || 6;
+            document.getElementById('dist-interval').value = btn.dataset.interval || 6;
         } else {
             document.getElementById('dist-url').value = '';
             document.getElementById('dist-path').value = '';
@@ -635,25 +633,40 @@
             document.getElementById('dist-interval').value = 6;
         }
 
-        document.getElementById('dist-modal').classList.add('open');
+        distModal.classList.add('open');
     }
 
     function closeDistModal() {
-        document.getElementById('dist-modal').classList.remove('open');
+        distModal.classList.remove('open');
     }
 
-    function confirmDownload(id) {
-        const d = cardsData[id];
-        const name = d ? d.title : id;
-        return confirm(`Отправить раздачу «${name}» в Transmission?\n\nСкачивание начнётся сразу (согласно настройкам Transmission).`);
-    }
-
-    document.getElementById('dist-modal').addEventListener('click', function (e) {
-        if (e.target === this) closeDistModal();
+    // Один слушатель на все кнопки раздач
+    document.addEventListener('click', function (e) {
+        const btn = e.target.closest('.js-dist-btn');
+        if (btn) {
+            e.preventDefault();
+            openDistModal(btn);
+        }
     });
 
+    document.getElementById('dist-modal-close').addEventListener('click', closeDistModal);
+    document.getElementById('dist-modal-cancel').addEventListener('click', closeDistModal);
+    distModal.addEventListener('click', function (e) {
+        if (e.target === distModal) closeDistModal();
+    });
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') closeDistModal();
+    });
+
+    // Подтверждение скачивания (читаем название из data-атрибута формы)
+    document.addEventListener('submit', function (e) {
+        const form = e.target.closest('.js-download-form');
+        if (form) {
+            const name = form.dataset.title || '';
+            if (!confirm(`Отправить раздачу «${name}» в Transmission?\n\nСкачивание начнётся сразу (согласно настройкам Transmission).`)) {
+                e.preventDefault();
+            }
+        }
     });
 </script>
 {% endblock %}
