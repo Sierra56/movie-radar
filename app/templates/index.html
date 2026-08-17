@@ -51,7 +51,7 @@
 
     .grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
         gap: 16px;
     }
 
@@ -60,6 +60,8 @@
         background: var(--bg-card);
         border-radius: 12px;
         overflow: hidden;
+        display: flex;
+        flex-direction: column;
     }
 
     .card img,
@@ -78,13 +80,25 @@
         color: var(--no-poster-text);
     }
 
+    .source-tag {
+        position: absolute;
+        top: 6px;
+        left: 6px;
+        background: var(--tag-bg);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        color: #fff;
+        z-index: 2;
+    }
+
     .info {
-        padding: 10px 12px 12px;
+        padding: 12px 12px 4px;
     }
 
     .card h2 {
         font-size: 15px;
-        margin-bottom: 4px;
+        margin-bottom: 6px;
     }
 
     .meta {
@@ -96,17 +110,6 @@
         color: var(--text-faint);
         font-size: 12px;
         margin-top: 4px;
-    }
-
-    .source-tag {
-        position: absolute;
-        top: 6px;
-        left: 6px;
-        background: var(--tag-bg);
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-size: 11px;
-        color: #fff;
     }
 
     .badge {
@@ -124,50 +127,10 @@
         color: var(--warning-text);
     }
 
-    .card-actions {
-        position: absolute;
-        top: 6px;
-        right: 6px;
-        display: flex;
-        gap: 4px;
-    }
-
-    .card-actions button {
-        width: 28px;
-        height: 28px;
-        padding: 0;
-        border-radius: 50%;
-        font-size: 14px;
-        border: 0;
-        cursor: pointer;
-        color: #fff;
-    }
-
-    .card-actions .btn-refresh {
-        background: var(--refresh-btn-bg);
-    }
-
-    .card-actions .btn-refresh:hover {
-        background: var(--refresh-btn-hover);
-    }
-
-    .card-actions .btn-delete {
-        background: var(--delete-btn-bg);
-    }
-
-    .card-actions .btn-delete:hover {
-        background: var(--delete-btn-hover);
-    }
-
-    .empty {
-        color: var(--text-muted);
-        margin-top: 20px;
-    }
-
     .updated-at {
         font-size: 11px;
         color: var(--text-faint);
-        margin-top: 4px;
+        margin-top: 6px;
     }
 
     .seasons-link {
@@ -188,23 +151,9 @@
         margin-top: 4px;
     }
 
-    .notify-toggle {
-        margin-top: 8px;
-    }
-
-    .notify-toggle label {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 12px;
+    .empty {
         color: var(--text-muted);
-        cursor: pointer;
-    }
-
-    .notify-toggle input {
-        width: 16px;
-        height: 16px;
-        cursor: pointer;
+        margin-top: 20px;
     }
 
     #progress-wrap {
@@ -239,134 +188,104 @@
         border: 1px dashed var(--accent);
     }
 
-    .dist-row {
+    /* Кнопки под карточкой */
+    .card-buttons {
+        padding: 8px 12px 12px;
+        margin-top: auto;
         display: flex;
-        align-items: center;
+        flex-direction: column;
         gap: 6px;
-        margin-top: 8px;
     }
 
-    .dist-row.clickable {
+    .btn-full {
+        width: 100%;
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 13px;
+        background: transparent;
         cursor: pointer;
-    }
-
-    .dist-row .btn-dist {
-        width: 24px;
-        height: 24px;
-        border-radius: 50%;
-        border: 0;
-        font-size: 12px;
-        color: #fff;
         display: flex;
         align-items: center;
         justify-content: center;
-        background: var(--delete-btn-bg);
-        opacity: .7;
-        flex-shrink: 0;
+        gap: 8px;
+        border: 1px solid;
+        font-weight: 500;
+        transition: background .15s, filter .15s;
     }
 
-    .dist-row.clickable:hover .btn-dist {
-        opacity: 1;
+    .btn-full:hover {
+        filter: brightness(1.25);
+        background: rgba(255, 255, 255, .06);
     }
 
-    .dist-row .btn-dist.idle {
-        background: var(--refresh-btn-bg);
-        opacity: 1;
+    .btn-full:disabled {
+        opacity: .35;
+        cursor: not-allowed;
     }
 
-    .dist-row .btn-dist.has_new {
-        background: var(--success);
-        opacity: 1;
+    .btn-full:disabled:hover {
+        filter: none;
+        background: transparent;
     }
 
-    .dist-row .btn-dist.downloading {
-        background: var(--accent);
-        opacity: 1;
+    .btn-blue {
+        border-color: #4f8cff;
+        color: #4f8cff;
+    }
+
+    .btn-red {
+        border-color: #ff5c5c;
+        color: #ff5c5c;
+    }
+
+    .btn-orange {
+        border-color: #f5a623;
+        color: #f5a623;
+    }
+
+    .btn-green {
+        border-color: #3ddc84;
+        color: #3ddc84;
+    }
+
+    /* Многоцветная кнопка раздачи (статус = цвет) */
+    .btn-dist-add {
+        border-color: #b07ce8;
+        color: #b07ce8;
+    }
+
+    /* нет раздачи */
+    .btn-dist-idle {
+        border-color: #4f8cff;
+        color: #4f8cff;
+    }
+
+    /* отслеживается */
+    .btn-dist-has_new {
+        border-color: #3ddc84;
+        color: #3ddc84;
+    }
+
+    /* новые эпизоды */
+    .btn-dist-downloading {
+        border-color: #4f8cff;
+        color: #4f8cff;
         animation: pulse 1.5s infinite;
     }
 
-    .dist-row .btn-dist.error {
-        background: var(--warning-bg);
-        color: var(--warning-text);
-        opacity: 1;
+    .btn-dist-error {
+        border-color: #f5a623;
+        color: #f5a623;
     }
 
-    .dist-row .btn-dist.dead {
-        background: var(--delete-btn-bg);
-        opacity: .5;
+    /* ошибка */
+    .btn-dist-dead {
+        border-color: #8b93a7;
+        color: #8b93a7;
+        opacity: .6;
     }
 
-    .dist-text {
-        font-size: 12px;
-        color: var(--text-muted);
-        flex: 1;
-    }
-
-    .dist-row.clickable .dist-text {
-        color: var(--text-faint);
-    }
-
-    .dist-row.clickable:hover .dist-text {
-        color: var(--accent);
-    }
-
-    .dist-text .count {
-        background: var(--error);
-        color: #fff;
-        font-size: 10px;
-        border-radius: 999px;
-        min-width: 16px;
-        height: 16px;
-        padding: 0 4px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        margin-left: 4px;
-    }
-
-    .dist-text .edit-hint {
-        color: var(--accent);
-    }
-
-    .btn-check,
-    .btn-download,
-    .btn-remove {
-        width: 24px;
-        height: 24px;
-        border-radius: 50%;
-        border: 0;
-        cursor: pointer;
-        font-size: 13px;
-        flex-shrink: 0;
-        color: #fff;
-    }
-
-    .btn-check {
-        background: var(--bg-hover);
-        color: var(--text);
-    }
-
-    .btn-check:hover {
-        background: var(--accent);
-        color: #fff;
-    }
-
-    .btn-download {
-        background: var(--accent);
-    }
-
-    .btn-download:hover {
-        filter: brightness(1.15);
-    }
-
-    .btn-remove {
-        background: var(--delete-btn-bg);
-    }
-
-    .btn-remove:hover {
-        background: var(--delete-btn-hover);
-    }
-
+    /* неактивна */
     @keyframes pulse {
 
         0%,
@@ -377,6 +296,32 @@
         50% {
             opacity: .5;
         }
+    }
+
+    .notify-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 2px 0;
+    }
+
+    .notify-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: var(--text);
+        cursor: pointer;
+    }
+
+    .notify-left input {
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+    }
+
+    .notify-bell {
+        font-size: 16px;
     }
 
     .modal-overlay {
@@ -525,17 +470,6 @@
         <div class="no-poster">нет постера</div>
         {% endif %}
 
-        <div class="card-actions">
-            {% if c.source != 'local' %}
-            <form method="post" action="/refresh/{{ c.external_id }}?sort={{ sort }}">
-                <button title="Обновить информацию из {{ c.source|upper }}" class="btn-refresh">🔄</button>
-            </form>
-            {% endif %}
-            <form method="post" action="/delete/{{ c.external_id }}?sort={{ sort }}">
-                <button title="Удалить" class="btn-delete">×</button>
-            </form>
-        </div>
-
         <div class="info">
             <h2>{{ c.title }}</h2>
             <p class="meta">
@@ -555,49 +489,58 @@
 
             {% if c.badge %}<span class="badge {{ 'out' if c.released else '' }}">{{ c.badge }}</span>{% endif %}
             {% if c.updated_at %}<p class="updated-at">обновлено: {{ c.updated_at }}</p>{% endif %}
+        </div>
 
-            <form class="notify-toggle" method="post" action="/toggle-notify/{{ c.external_id }}?sort={{ sort }}">
-                <label>
-                    <input type="checkbox" {% if c.notify_enabled %}checked{% endif %} onchange="this.form.submit()">
-                    🔔 Уведомления
-                </label>
+        <div class="card-buttons">
+            {% if c.source != 'local' %}
+            <form method="post" action="/refresh/{{ c.external_id }}?sort={{ sort }}">
+                <button class="btn-full btn-blue" type="submit">🔄 Обновить информацию</button>
+            </form>
+            {% endif %}
+
+            <form method="post" action="/delete/{{ c.external_id }}?sort={{ sort }}">
+                <button class="btn-full btn-red" type="submit">🗑 Удалить</button>
             </form>
 
-            <div class="dist-row clickable"
-                onclick="openDistModal('{{ c.external_id }}', '{{ c.title|e }}', {{ c.has_distribution|tojson }})">
-                <button class="btn-dist {{ c.distribution_status if c.has_distribution else '' }}">🎬</button>
-                <span class="dist-text">
-                    {% if c.has_distribution %}
-                    {% if c.distribution_status == 'has_new' %}новые эпизоды{% if c.new_count %}<span class="count">{{
-                        c.new_count }}</span>{% endif %}
-                    {% elif c.distribution_status == 'downloading' %}скачивается
-                    {% elif c.distribution_status == 'error' %}ошибка
-                    {% elif c.distribution_status == 'dead' %}неактивна
-                    {% else %}отслеживается{% endif %}
-                    · <span class="edit-hint">изменить</span>
-                    {% else %}
-                    добавить раздачу
-                    {% endif %}
-                </span>
-            </div>
-
+            {# Многоцветная кнопка раздачи: цвет = статус #}
             {% if c.has_distribution %}
-            <div class="dist-row" style="margin-top:4px;">
-                <form method="post" action="/distribution/check/{{ c.external_id }}?sort={{ sort }}"
-                    style="display:inline;" onclick="event.stopPropagation()">
-                    <button class="btn-check" title="Проверить раздачу сейчас">⟳</button>
-                </form>
-                <form method="post" action="/distribution/download/{{ c.external_id }}?sort={{ sort }}"
-                    style="display:inline;" onclick="event.stopPropagation()"
-                    onsubmit="return confirmDownload('{{ c.title|e }}')">
-                    <button class="btn-download" title="Скачать в Transmission">📥</button>
-                </form>
-                <form method="post" action="/distribution/remove/{{ c.external_id }}?sort={{ sort }}"
-                    style="display:inline;" onclick="event.stopPropagation()" onsubmit="return confirmRemove()">
-                    <button class="btn-remove" title="Удалить раздачу">🗑</button>
-                </form>
-            </div>
+            <button class="btn-full btn-dist-{{ c.distribution_status }}" type="button"
+                title="Статус: {{ c.distribution_status }}"
+                onclick="openDistModal('{{ c.external_id }}', '{{ c.title|e }}', true)">
+                🎬 Изменить раздачу
+                {% if c.distribution_status == 'has_new' %}· новые{% if c.new_count %} ({{ c.new_count }}){% endif %}
+                {% elif c.distribution_status == 'downloading' %}· качается
+                {% elif c.distribution_status == 'error' %}· ошибка
+                {% elif c.distribution_status == 'dead' %}· неактивна
+                {% else %}· ок{% endif %}
+            </button>
+            {% else %}
+            <button class="btn-full btn-dist-add" type="button"
+                onclick="openDistModal('{{ c.external_id }}', '{{ c.title|e }}', false)">
+                🎬 Добавить раздачу
+            </button>
             {% endif %}
+
+            <form method="post" action="/distribution/check/{{ c.external_id }}?sort={{ sort }}">
+                <button class="btn-full btn-orange" type="submit" {% if not c.has_distribution %}disabled{% endif %}>
+                    ⟳ Проверить обновление
+                </button>
+            </form>
+
+            <form method="post" action="/distribution/download/{{ c.external_id }}?sort={{ sort }}"
+                onsubmit="return confirmDownload('{{ c.title|e }}')">
+                <button class="btn-full btn-green" type="submit" {% if not c.has_distribution %}disabled{% endif %}>
+                    ⬇ Скачать торрент
+                </button>
+            </form>
+
+            <form class="notify-row" method="post" action="/toggle-notify/{{ c.external_id }}?sort={{ sort }}">
+                <label class="notify-left">
+                    <input type="checkbox" {% if c.notify_enabled %}checked{% endif %} onchange="this.form.submit()">
+                    <span>Уведомления</span>
+                </label>
+                <span class="notify-bell">🔔</span>
+            </form>
         </div>
     </article>
     {% else %}
@@ -618,13 +561,12 @@
                     <label>Ссылка на раздачу (rutracker)</label>
                     <input type="text" name="url" id="dist-url"
                         placeholder="https://rutracker.org/forum/viewtopic.php?t=..." required>
-                    <p class="hint">При сохранении статус проверки сбрасывается — потребуется ⟳ для загрузки нового
-                        списка файлов.</p>
+                    <p class="hint">При изменении статус проверки сбрасывается — нажмите ⟳ после сохранения.</p>
                 </div>
                 <div class="field">
                     <label>Путь сохранения (опционально)</label>
                     <input type="text" name="download_path" id="dist-path" placeholder="/media/series/Название">
-                    <p class="hint">Оставьте пустым, чтобы использовать базовую директорию из настроек Transmission.</p>
+                    <p class="hint">Оставьте пустым, чтобы использовать базовую директорию Transmission.</p>
                 </div>
                 <div class="field">
                     <label>Режим проверки</label>
@@ -674,7 +616,6 @@
     }
     pollProgress();
 
-    // Данные раздач для предзаполнения модалки
     const distributionsData = {
   {% for c in cards %}
     {% if c.has_distribution %}
@@ -693,15 +634,14 @@
         document.getElementById('dist-modal-title').textContent =
             hasDistribution ? 'Изменить раздачу: ' + titleName : 'Добавить раздачу: ' + titleName;
 
-        // Предзаполняем данные если раздача уже есть
         const dist = distributionsData[titleId];
         if (dist) {
             document.getElementById('dist-url').value = dist.url || '';
             document.getElementById('dist-path').value = dist.download_path || '';
-            document.querySelector(`input[name="mode"][value="${dist.mode}"]`).checked = true;
+            const modeInput = document.querySelector(`input[name="mode"][value="${dist.mode}"]`);
+            if (modeInput) modeInput.checked = true;
             document.getElementById('dist-interval').value = dist.check_interval_hours || 6;
         } else {
-            // Очищаем форму для новой раздачи
             document.getElementById('dist-url').value = '';
             document.getElementById('dist-path').value = '';
             document.querySelector('input[name="mode"][value="smart"]').checked = true;
@@ -717,10 +657,6 @@
 
     function confirmDownload(titleName) {
         return confirm(`Отправить раздачу «${titleName}» в Transmission?\n\nСкачивание начнётся сразу (согласно настройкам Transmission).`);
-    }
-
-    function confirmRemove() {
-        return confirm('Удалить раздачу из отслеживания?\n\nКарточка останется, но раздача больше не будет проверяться.');
     }
 
     document.getElementById('dist-modal').addEventListener('click', function (e) {

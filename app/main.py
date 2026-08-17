@@ -518,7 +518,6 @@ def ensure_schema():
             auto_download_new_files INTEGER DEFAULT 0
          )""", write=True)
     db("INSERT OR IGNORE INTO transmission_settings (id) VALUES (1)", write=True)
-    # Миграция: добавляем новые колонки если их нет
     for col in ("default_download_behavior TEXT DEFAULT 'use_distribution_path'",
                 "auto_download_new_files INTEGER DEFAULT 0"):
         try:
@@ -571,16 +570,18 @@ def ensure_schema():
             last_updated_at TEXT,
             FOREIGN KEY (distribution_id) REFERENCES distributions(id) ON DELETE CASCADE
          )""", write=True)
+
+    # Таблица-предохранитель от повторных уведомлений
     db("""CREATE TABLE IF NOT EXISTS sent_notifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             notification_type TEXT NOT NULL,
             external_id TEXT NOT NULL,
-            details TEXT,
+            details TEXT DEFAULT '',
             sent_date TEXT NOT NULL,
             sent_at TEXT DEFAULT (datetime('now'))
          )""", write=True)
     db("""CREATE INDEX IF NOT EXISTS idx_sent_notifications_lookup
-          ON sent_notifications(notification_type, external_id, sent_date)""",
+          ON sent_notifications(notification_type, external_id, details, sent_date)""",
        write=True)
 
 
@@ -686,7 +687,6 @@ def build_tracker_client(tracker_name: str = "rutracker",
 
 
 def build_transmission_client() -> TransmissionClient:
-    """Собирает клиент Transmission из настроек."""
     trans = get_transmission_settings() or {}
     password = decrypt_value(trans.get("encrypted_password", "")) if trans.get("encrypted_password") else ""
     return TransmissionClient(
@@ -695,6 +695,27 @@ def build_transmission_client() -> TransmissionClient:
         username=trans.get("username", ""),
         password=password
     )
+
+
+# ── Notification dedup ────────────────────────────────
+def was_notified_today(notification_type: str, external_id: str, details: str = "") -> bool:
+    today = date.today().isoformat()
+    rows = db("""SELECT 1 FROM sent_notifications
+                 WHERE notification_type=? AND external_id=? AND details=? AND sent_date=?""",
+              (notification_type, external_id, details, today))
+    return bool(rows)
+
+
+def mark_notified_today(notification_type: str, external_id: str, details: str = ""):
+    today = date.today().isoformat()
+    db("""INSERT INTO sent_notifications (notification_type, external_id, details, sent_date)
+          VALUES (?,?,?,?)""",
+       (notification_type, external_id, details, today), write=True)
+
+
+def cleanup_old_notifications(days_to_keep: int = 7):
+    cutoff = (date.today() - timedelta(days=days_to_keep)).isoformat()
+    db("DELETE FROM sent_notifications WHERE sent_date < ?", (cutoff,), write=True)
 
 
 templates.env.globals["get_theme"] = get_theme
@@ -708,7 +729,7 @@ def log_update(external_id: str, title: str, field: str,
        (external_id, title, field, old_value, new_value), write=True)
 
 
-# ── Helpers ───────────────────────────────────────────
+# ── Helpers ──────────────────────────────────────────
 def human_date(iso: str | None) -> str | None:
     if not iso:
         return None
@@ -773,52 +794,43 @@ def format_size(size_bytes: int) -> str:
         return f"{size_mb / 1024:.2f} ГБ"
     return f"{size_mb:.1f} МБ"
 
-def was_notified_today(notification_type: str, external_id: str, details: str = "") -> bool:
-    """Проверяет, было ли отправлено уведомление этого типа сегодня."""
-    today = date.today().isoformat()
-    rows = db("""SELECT 1 FROM sent_notifications
-                 WHERE notification_type=? AND external_id=? AND details=? AND sent_date=?""",
-              (notification_type, external_id, details, today))
-    return bool(rows)
-
-
-def mark_notified_today(notification_type: str, external_id: str, details: str = ""):
-    """Помечает уведомление как отправленное сегодня."""
-    today = date.today().isoformat()
-    db("""INSERT INTO sent_notifications (notification_type, external_id, details, sent_date)
-          VALUES (?,?,?,?)""",
-       (notification_type, external_id, details, today), write=True)
-
-
-def cleanup_old_notifications(days_to_keep: int = 7):
-    """Удаляет старые записи об уведомлениях старше указанного количества дней."""
-    cutoff = (date.today() - timedelta(days=days_to_keep)).isoformat()
-    db("DELETE FROM sent_notifications WHERE sent_date < ?", (cutoff,), write=True)
-
 
 # ── Seasons & episodes helpers ────────────────────────
 async def save_seasons(title_external_id: str, seasons: list) -> list:
-    existing = db("SELECT season_number FROM seasons WHERE title_external_id=?",
+    """Сохраняет сезоны. ВАЖНО: использует UPDATE для существующих,
+    чтобы сохранить id (эпизоды привязаны к season_id)."""
+    existing = db("SELECT season_number, id FROM seasons WHERE title_external_id=?",
                   (title_external_id,))
-    existing_numbers = {r["season_number"] for r in existing}
+    existing_map = {r["season_number"]: r["id"] for r in existing}
 
     new_seasons = []
     safe_id = sanitize_id(title_external_id)
     for s in seasons:
-        if s["season_number"] not in existing_numbers:
-            new_seasons.append(s)
-
         poster_local = None
         if s.get("poster_path"):
             url = f"https://image.tmdb.org/t/p/w342{s['poster_path']}"
             filename = f"{safe_id}_s{s['season_number']}.jpg"
             poster_local = await download_image(url, filename) or url
 
-        db("""INSERT OR REPLACE INTO seasons
-              (title_external_id, season_number, name, release_date, episodes, poster_url)
-              VALUES (?,?,?,?,?,?)""",
-           (title_external_id, s["season_number"], s["name"],
-            s["release_date"], s["episodes"], poster_local), write=True)
+        if s["season_number"] in existing_map:
+            # UPDATE сохраняет id — эпизоды не теряются
+            if poster_local:
+                db("""UPDATE seasons SET name=?, release_date=?, episodes=?, poster_url=?
+                      WHERE id=?""",
+                   (s["name"], s["release_date"], s["episodes"], poster_local,
+                    existing_map[s["season_number"]]), write=True)
+            else:
+                db("""UPDATE seasons SET name=?, release_date=?, episodes=?
+                      WHERE id=?""",
+                   (s["name"], s["release_date"], s["episodes"],
+                    existing_map[s["season_number"]]), write=True)
+        else:
+            new_seasons.append(s)
+            db("""INSERT INTO seasons
+                  (title_external_id, season_number, name, release_date, episodes, poster_url)
+                  VALUES (?,?,?,?,?,?)""",
+               (title_external_id, s["season_number"], s["name"],
+                s["release_date"], s["episodes"], poster_local), write=True)
 
     return new_seasons
 
@@ -1059,6 +1071,12 @@ async def notify_new_season(show_title: str, season_number: int,
     if not s or not s.get("bot_token") or not s.get("chat_id"):
         return
 
+    details = json.dumps({"season": season_number})
+    if not force and was_notified_today("new_season", show_title, details):
+        print(f"[telegram] Season already notified today: {show_title} S{season_number}")
+        return
+    mark_notified_today("new_season", show_title, details)
+
     lines = [
         "🆕 <b>Новый сезон в каталоге</b>",
         "",
@@ -1084,16 +1102,12 @@ async def notify_new_episodes(show_title: str, new_eps: list, force: bool = Fals
 
     sorted_eps = sorted(new_eps, key=lambda x: (x["season_number"], x["episode_number"]))
 
-    # Фильтруем эпизоды, о которых уже уведомляли сегодня
+    # Фильтруем эпизоды, о которых уже уведомляли сегодня (предохранитель от дублей)
     eps_to_notify = []
     for ep in sorted_eps:
-        # Создаём уникальный идентификатор эпизода
-        ep_id = f"{ep['season_number']}_{ep['episode_number']}"
-        details = json.dumps({"season": ep['season_number'], "episode": ep['episode_number']})
-        
-        if not was_notified_today("new_episode", show_title, details):
+        details = json.dumps({"season": ep["season_number"], "episode": ep["episode_number"]})
+        if force or not was_notified_today("new_episode", show_title, details):
             eps_to_notify.append(ep)
-            # Помечаем как уведомлённое (чтобы не отправить повторно сегодня)
             mark_notified_today("new_episode", show_title, details)
 
     if not eps_to_notify:
@@ -1178,6 +1192,7 @@ async def notify_torrent_completed(title: str, torrent_name: str,
 
 async def check_and_notify(force: bool = False):
     cleanup_old_notifications(7)
+
     s = get_telegram_settings()
     if not force and (not s or not s.get("enabled")):
         return
@@ -1795,7 +1810,6 @@ async def img_proxy(url: str):
 
 # ── Stage 2-3: rutracker + Transmission ──────────────
 async def check_distribution_now(title_external_id: str) -> tuple:
-    """Manually check a distribution. Returns (ok, message)."""
     dist = get_distribution(title_external_id)
     if not dist:
         return False, "Раздача не найдена"
@@ -1883,7 +1897,6 @@ async def check_distribution_now(title_external_id: str) -> tuple:
        (new_hash, json.dumps(snapshot, ensure_ascii=False), status, new_count,
         dist["id"]), write=True)
 
-    # Авто-скачивание при обнаружении новых файлов
     if new_count > 0:
         trans = get_transmission_settings()
         if (trans and trans.get("enabled") and
@@ -1922,13 +1935,11 @@ async def check_distribution_now(title_external_id: str) -> tuple:
 
 
 def _resolve_download_dir(dist: dict, trans: dict) -> str | None:
-    """Определяет путь для скачивания на основе поведения из настроек."""
     behavior = trans.get("default_download_behavior", "use_distribution_path")
     if behavior == "use_distribution_path":
         if dist.get("download_path"):
             return dist["download_path"]
         return trans.get("base_download_dir") or None
-    # use_base_dir
     return trans.get("base_download_dir") or None
 
 
@@ -1995,17 +2006,14 @@ async def test_tracker_login():
         return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
     except Exception as e:
         print(f"[tracker-test] Unexpected error: {type(e).__name__}: {e}")
-        import traceback
         traceback.print_exc()
         db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name='rutracker'",
            (f"{type(e).__name__}: {e}",), write=True)
         return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
 
 
-# ── Stage 3: Transmission download ──────────────────
 @app.post("/distribution/download/{title_external_id}")
 async def download_distribution(title_external_id: str, sort: str = "date"):
-    """Скачивает торрент в Transmission вручную."""
     dist = get_distribution(title_external_id)
     if not dist:
         set_setting("last_dist_download", "Раздача не найдена")
@@ -2029,11 +2037,15 @@ async def download_distribution(title_external_id: str, sort: str = "date"):
     tracker_client = build_tracker_client(dist["tracker_name"], cookies=cookies)
 
     try:
+        print(f"[download] Downloading .torrent for {dist['torrent_id']}")
         torrent_data = await tracker_client.download_torrent(dist["torrent_id"], cookies)
+        print(f"[download] Downloaded {len(torrent_data)} bytes")
 
         download_dir = _resolve_download_dir(dist, trans)
         action = trans.get("action_on_new", "download")
         paused = (action == "pause")
+
+        print(f"[download] Sending to Transmission: dir={download_dir}, paused={paused}")
 
         trans_client = build_transmission_client()
         result = trans_client.add_torrent(torrent_data, download_dir, paused)
@@ -2055,20 +2067,21 @@ async def download_distribution(title_external_id: str, sort: str = "date"):
         await notify_torrent_started(card_title, result["name"], download_dir)
 
         set_setting("last_dist_download",
-                    f"Отправлено в Transmission: {result['name']} ({format_size(result['size'])})")
+                    f"✅ Отправлено: {result['name']} ({format_size(result['size'])})")
         return RedirectResponse(f"/?sort={sort}&msg=dist-downloaded", status_code=303)
 
     except Exception as e:
-        print(f"[download] Error: {type(e).__name__}: {e}")
+        error_msg = str(e)
+        print(f"[download] Error: {type(e).__name__}: {error_msg}")
+        traceback.print_exc()
         db("UPDATE distributions SET status='error', error_message=?, error_count=error_count+1 WHERE id=?",
-           (str(e), dist["id"]), write=True)
-        set_setting("last_dist_download", f"Ошибка: {e}")
+           (error_msg, dist["id"]), write=True)
+        set_setting("last_dist_download", f"❌ Ошибка: {error_msg}")
         return RedirectResponse(f"/?sort={sort}&msg=dist-download-fail", status_code=303)
 
 
 @app.post("/settings/transmission/test")
 async def test_transmission():
-    """Проверяет соединение с Transmission."""
     trans = get_transmission_settings()
     if not trans or not trans.get("host"):
         return RedirectResponse("/settings?msg=transmission-test-fail", status_code=303)
@@ -2076,6 +2089,7 @@ async def test_transmission():
         trans_client = build_transmission_client()
         ok, message = trans_client.test_connection()
         if ok:
+            set_setting("last_trans_test", message)
             return RedirectResponse("/settings?msg=transmission-test-ok", status_code=303)
         else:
             set_setting("last_trans_test", message)
@@ -2141,6 +2155,11 @@ async def index(request: Request, sort: str = "date",
         c["has_distribution"] = dist is not None
         c["distribution_status"] = dist["status"] if dist else None
         c["new_count"] = dist["new_files_count"] if dist else 0
+        if dist:
+            c["distribution_url"] = dist["url"]
+            c["distribution_download_path"] = dist["download_path"]
+            c["distribution_mode"] = dist["mode"]
+            c["distribution_check_interval_hours"] = dist["check_interval_hours"]
 
         cards.append(c)
 
@@ -2148,7 +2167,7 @@ async def index(request: Request, sort: str = "date",
         "refresh-started": "Обновление запущено в фоне.",
         "card-updated": "Карточка обновлена.",
         "dist-added": "Раздача добавлена.",
-        "dist-updated": "Раздача обновлена. Сбросьте проверку (⟳) для загрузки нового списка файлов.",
+        "dist-updated": "Раздача обновлена. Нажмите ⟳ для загрузки нового списка файлов.",
         "dist-removed": "Раздача удалена.",
         "dist-checked": get_setting("last_dist_check") or "Проверка выполнена.",
         "dist-downloaded": get_setting("last_dist_download") or "Торрент отправлен в Transmission.",
@@ -2550,7 +2569,7 @@ async def add_distribution(title_external_id: str = Form(...),
                            check_interval_hours: int = Form(6)):
     existing = get_distribution(title_external_id)
     torrent_id = parse_torrent_id(url)
-    
+
     if not torrent_id:
         return RedirectResponse("/?msg=dist-invalid-url", status_code=303)
 
@@ -2558,7 +2577,6 @@ async def add_distribution(title_external_id: str = Form(...),
         mode = "smart"
 
     if existing:
-        # Обновляем существующую раздачу
         db("""UPDATE distributions SET
                 tracker_name='rutracker', torrent_id=?, url=?, download_path=?,
                 mode=?, check_interval_hours=?, status='idle',
@@ -2570,7 +2588,6 @@ async def add_distribution(title_external_id: str = Form(...),
            write=True)
         return RedirectResponse("/?msg=dist-updated", status_code=303)
     else:
-        # Создаём новую раздачу
         db("""INSERT INTO distributions
               (title_external_id, tracker_name, torrent_id, url, download_path,
                mode, check_interval_hours, status)
