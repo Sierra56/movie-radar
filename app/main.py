@@ -623,12 +623,29 @@ def progress_percent(w, t):
 
 
 def parse_torrent_id(url):
+    """Парсит ID торрента из URL rutracker или kinozal."""
     url = url.strip()
+    
+    # Rutracker: viewtopic.php?t=12345
     if "viewtopic.php" in url:
         for pair in urlparse(url).query.split("&"):
             if pair.startswith("t="):
                 return pair[2:]
-    m = _re.search(r"t=(\d+)", url)
+        m = _re.search(r"t=(\d+)", url)
+        if m:
+            return m.group(1)
+    
+    # Kinozal: details.php?id=12345
+    if "details.php" in url:
+        for pair in urlparse(url).query.split("&"):
+            if pair.startswith("id="):
+                return pair[3:]
+        m = _re.search(r"id=(\d+)", url)
+        if m:
+            return m.group(1)
+    
+    # Fallback: любое число в URL
+    m = _re.search(r"[?&](?:t|id)=(\d+)", url)
     return m.group(1) if m else None
 
 

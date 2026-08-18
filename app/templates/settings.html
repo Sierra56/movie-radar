@@ -533,47 +533,44 @@
 
 <div class="section">
     <h2>🎬 Торрент-трекер: kinozal.me</h2>
-    <div class="warning-box">
-        <p><strong>ℹ️ kinozal.me</strong> — резервный трекер для случаев, когда раздача недоступна на rutracker или
-            заблокирована Cloudflare.</p>
+</div>
+<form method="post" action="/settings/tracker">
+    <input type="hidden" name="tracker_name" value="kinozal">
+    <div class="check-row">
+        <input type="checkbox" name="enabled" id="kz-enabled" {% if tracker_kz and tracker_kz.get('enabled') %}checked{%
+            endif %}>
+        <label for="kz-enabled">Включить kinozal.me</label>
+        {% if tracker_kz_has_cookies %}<span class="cookies-loaded-badge">✅ Cookies загружены</span>{% endif %}
     </div>
-    <form method="post" action="/settings/tracker">
-        <input type="hidden" name="tracker_name" value="kinozal">
-        <div class="check-row">
-            <input type="checkbox" name="enabled" id="kz-enabled" {% if tracker_kz and tracker_kz.get('enabled')
-                %}checked{% endif %}>
-            <label for="kz-enabled">Включить kinozal.me</label>
-            {% if tracker_kz_has_cookies %}<span class="cookies-loaded-badge">✅ Cookies загружены</span>{% endif %}
-        </div>
 
-        <h3>Способ 1: Ручной ввод cookies (рекомендуется)</h3>
-        <div class="field">
-            <label>Cookies из браузера</label>
-            <textarea name="cookies_manual" rows="4" placeholder="uid=...; pass=...; ..."></textarea>
-        </div>
-        <div class="field">
-            <label>User-Agent вашего браузера (обязательно)</label>
-            <input type="text" name="user_agent" value="{{ tracker_kz.get('user_agent', '') if tracker_kz else '' }}">
-        </div>
+    <h3>Способ 1: Ручной ввод cookies (рекомендуется)</h3>
+    <div class="field">
+        <label>Cookies из браузера</label>
+        <textarea name="cookies_manual" rows="4" placeholder="uid=...; pass=...; ..."></textarea>
+    </div>
+    <div class="field">
+        <label>User-Agent вашего браузера (обязательно)</label>
+        <input type="text" name="user_agent" value="{{ tracker_kz.get('user_agent', '') if tracker_kz else '' }}">
+    </div>
 
-        <h3>Способ 2: Логин/пароль (fallback)</h3>
-        <div class="two-col">
-            <div class="field"><label>Логин</label><input type="text" name="username"
-                    value="{{ tracker_kz.get('username', '') if tracker_kz else '' }}"></div>
-            <div class="field"><label>Пароль</label><input type="password" name="password" placeholder="••••••••"></div>
-        </div>
+    <h3>Способ 2: Логин/пароль (fallback)</h3>
+    <div class="two-col">
+        <div class="field"><label>Логин</label><input type="text" name="username"
+                value="{{ tracker_kz.get('username', '') if tracker_kz else '' }}"></div>
+        <div class="field"><label>Пароль</label><input type="password" name="password" placeholder="••••••••"></div>
+    </div>
 
-        {% if tracker_kz and tracker_kz.get('last_error') %}<p class="status-line err">Последняя ошибка: {{
-            tracker_kz['last_error'] }}</p>{% endif %}
-        {% if tracker_kz and tracker_kz.get('last_login_at') %}<p class="status-line ok">Последний успешный доступ: {{
-            tracker_kz['last_login_at'] }}</p>{% endif %}
+    {% if tracker_kz and tracker_kz.get('last_error') %}<p class="status-line err">Последняя ошибка: {{
+        tracker_kz['last_error'] }}</p>{% endif %}
+    {% if tracker_kz and tracker_kz.get('last_login_at') %}<p class="status-line ok">Последний успешный доступ: {{
+        tracker_kz['last_login_at'] }}</p>{% endif %}
 
-        <div class="btn-row">
-            <button type="submit">Сохранить</button>
-            <button type="submit" formaction="/settings/tracker/test" class="secondary">🔑 Проверить
-                подключение</button>
-        </div>
-    </form>
+    <div class="btn-row">
+        <button type="submit">Сохранить</button>
+        <button type="submit" formaction="/settings/tracker/test" class="secondary">🔑 Проверить
+            подключение</button>
+    </div>
+</form>
 </div>
 
 <div class="section">
