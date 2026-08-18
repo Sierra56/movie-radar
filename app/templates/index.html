@@ -108,6 +108,12 @@
         font-size: 13px;
     }
 
+    .next-ep {
+        color: var(--accent);
+        font-size: 12px;
+        margin-top: 4px;
+    }
+
     .genre {
         color: var(--text-faint);
         font-size: 12px;
@@ -459,6 +465,20 @@
     .learn-samples div {
         padding: 3px 0;
     }
+
+    .learn-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+    }
+
+    .learn-actions form {
+        flex: 1;
+    }
+
+    .learn-actions button {
+        width: 100%;
+    }
 </style>
 {% endblock %}
 
@@ -501,6 +521,8 @@
         <div class="info">
             <h2>{{ c.title }}</h2>
             <p class="meta">{% if c.date_human %}{{ c.date_human }}{% else %}дата неизвестна{% endif %}</p>
+            {% if c.next_episode_date_human %}<p class="next-ep">📺 След. эпизод: {{ c.next_episode_date_human }}</p>{%
+            endif %}
             {% if c.genres %}<p class="genre">{{ c.genres }}</p>{% endif %}
             {% if c.type == 'series' %}
             <a class="seasons-link" href="/title/{{ c.external_id }}">📺 {{ c.season_count or 0 }} сезон(ов){% if
@@ -526,8 +548,7 @@
                 data-has="true" data-url="{{ (c.distribution_url or '')|e }}"
                 data-path="{{ (c.distribution_download_path or '')|e }}"
                 data-mode="{{ (c.distribution_mode or 'smart')|e }}"
-                data-interval="{{ c.distribution_check_interval_hours or 6 }}"
-                data-tracker="{{ (c.distribution_tracker or 'rutracker')|e }}">
+                data-interval="{{ c.distribution_check_interval_hours or 6 }}">
                 🎬 Изменить раздачу{% if c.distribution_status == 'has_new' and c.new_count %}<span
                     class="count-badge">{{ c.new_count }}</span>{% endif %}
             </button>
@@ -578,18 +599,11 @@
                 <form method="post" action="/distribution/add" id="dist-form">
                     <input type="hidden" name="title_external_id" id="dist-title-id">
                     <div class="field">
-                        <label>Трекер</label>
-                        <select name="tracker_name" id="dist-tracker">
-                            <option value="rutracker">rutracker.org</option>
-                            <option value="kinozal">kinozal.me</option>
-                        </select>
-                        <p class="hint">Оба трекера настраиваются в разделе «Настройки».</p>
-                    </div>
-                    <div class="field">
                         <label>Ссылка на раздачу</label>
-                        <input type="text" name="url" id="dist-url" placeholder="https://.../viewtopic.php?t=..."
+                        <input type="text" name="url" id="dist-url"
+                            placeholder="https://rutracker.org/... или https://kinozal.me/... или http://rutor.info/..."
                             required>
-                        <p class="hint">При изменении статус проверки сбрасывается — нажмите ⟳ после сохранения.</p>
+                        <p class="hint">Трекер определяется автоматически по URL.</p>
                     </div>
                     <div class="field">
                         <label>Путь сохранения (опционально)</label>
@@ -636,7 +650,7 @@
                         <button type="submit">Сохранить обучение</button>
                     </div>
                 </form>
-                <form id="learn-reset-form" method="post" action="" style="margin-top:8px">
+                <form id="learn-reset-form" method="post" action="">
                     <button type="submit" class="secondary">🗑 Сбросить обучение</button>
                 </form>
             </div>
@@ -709,14 +723,12 @@
         document.getElementById('dist-modal-title').textContent = (has ? 'Изменить раздачу: ' : 'Добавить раздачу: ') + title;
 
         if (has) {
-            document.getElementById('dist-tracker').value = btn.dataset.tracker || 'rutracker';
             document.getElementById('dist-url').value = btn.dataset.url || '';
             document.getElementById('dist-path').value = btn.dataset.path || '';
             const mi = document.querySelector(`input[name="mode"][value="${btn.dataset.mode || 'smart'}"]`);
             if (mi) mi.checked = true;
             document.getElementById('dist-interval').value = btn.dataset.interval || 6;
         } else {
-            document.getElementById('dist-tracker').value = 'rutracker';
             document.getElementById('dist-url').value = '';
             document.getElementById('dist-path').value = '';
             document.querySelector('input[name="mode"][value="smart"]').checked = true;

@@ -19,7 +19,8 @@ from urllib.parse import quote, urlparse
 import httpx
 from cryptography.fernet import Fernet
 from fastapi import FastAPI, Form, Request, Response, BackgroundTasks, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
+from fastapi.responses import (HTMLResponse, RedirectResponse, JSONResponse,
+                               StreamingResponse, FileResponse)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -28,6 +29,7 @@ from apscheduler.triggers.cron import CronTrigger
 from .rutracker import (RuTrackerClient, RuTrackerError, RuTrackerCaptchaError,
                         RuTrackerAuthError, RuTrackerForbiddenError, BaseTracker)
 from .kinozal import (KinozalClient, KinozalError, KinozalAuthError, KinozalForbiddenError)
+from .rutor import RutorClient, RutorError
 from .transmission import TransmissionClient
 
 OMDB_KEY = os.getenv("OMDB_API_KEY", "")
@@ -41,6 +43,10 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 POSTERS_DIR = os.path.join(os.path.dirname(DB_PATH), "posters")
 os.makedirs(POSTERS_DIR, exist_ok=True)
 app.mount("/posters", StaticFiles(directory=POSTERS_DIR), name="posters")
+
+STATIC_DIR = Path(__file__).parent / "static"
+os.makedirs(STATIC_DIR, exist_ok=True)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 MONTHS_RU = ["января", "февраля", "марта", "апреля", "мая", "июня",
              "июля", "августа", "сентября", "октября", "ноября", "декабря"]
@@ -537,13 +543,12 @@ def build_tracker_client(tracker_name: str = "rutracker",
     effective_cookies = cookies if cookies is not None else load_tracker_cookies(tracker_name)
 
     if tracker_name == "kinozal":
-        return KinozalClient(
-            username=username, password=password, proxy=get_proxy_url(),
-            cookies=effective_cookies, user_agent=user_agent)
-
-    return RuTrackerClient(
-        username=username, password=password, proxy=get_proxy_url(),
-        cookies=effective_cookies, user_agent=user_agent)
+        return KinozalClient(username=username, password=password, proxy=get_proxy_url(),
+                             cookies=effective_cookies, user_agent=user_agent)
+    if tracker_name == "rutor":
+        return RutorClient(proxy=get_proxy_url(), user_agent=user_agent)
+    return RuTrackerClient(username=username, password=password, proxy=get_proxy_url(),
+                           cookies=effective_cookies, user_agent=user_agent)
 
 
 def build_transmission_client():
@@ -622,20 +627,31 @@ def progress_percent(w, t):
     return round(w / t * 100) if t > 0 else 0
 
 
-def parse_torrent_id(url):
+def parse_torrent_url(url: str) -> tuple:
+    """Автоопределение трекера. Возвращает (tracker_name, torrent_id) или (None, None)."""
     url = url.strip()
     parsed = urlparse(url)
-    pairs = parsed.query.split("&")
-    if "viewtopic.php" in parsed.path:
-        for pair in pairs:
+    host = (parsed.hostname or "").lower()
+
+    if "rutracker" in host:
+        for pair in parsed.query.split("&"):
             if pair.startswith("t="):
-                return pair[2:]
-    if "details.php" in parsed.path:
-        for pair in pairs:
+                return "rutracker", pair[2:]
+        m = _re.search(r"t=(\d+)", url)
+        return ("rutracker", m.group(1)) if m else (None, None)
+
+    if "kinozal" in host:
+        for pair in parsed.query.split("&"):
             if pair.startswith("id="):
-                return pair[3:]
-    m = _re.search(r"[?&](?:t|id)=(\d+)", url)
-    return m.group(1) if m else None
+                return "kinozal", pair[3:]
+        m = _re.search(r"id=(\d+)", url)
+        return ("kinozal", m.group(1)) if m else (None, None)
+
+    if "rutor" in host:
+        m = _re.search(r"/(?:download/|torrent/)(\d+)", url)
+        return ("rutor", m.group(1)) if m else (None, None)
+
+    return (None, None)
 
 
 def format_size(size_bytes):
@@ -711,7 +727,8 @@ def record_learning_samples(dist, new_files):
         if delay < 0 or delay > 2000:
             continue
         samples.append({"season": ep[0], "episode": ep[1], "air_date": air,
-                        "detected_at": now.isoformat(), "delay_hours": round(delay, 1)})
+                        "detected_at": now.isoformat(), "delay_hours": round(delay, 1),
+                        "air_hour": now.hour})
         existing.add(ep)
         added += 1
     if not added:
@@ -1243,9 +1260,12 @@ def effective_interval_hours(dist):
     pat = get_pattern(dist["id"])
     if (pat and (pat.get("samples_count") or 0) >= (pat.get("min_samples") or 3)
             and pat.get("median_delay_hours") and dist.get("next_episode_air_date")):
+        samples = json.loads(pat["samples_json"] or "[]")
+        hours = [s.get("air_hour") for s in samples if "air_hour" in s]
+        median_hour = int(statistics.median(hours)) if hours else 0
         try:
             air = date.fromisoformat(dist["next_episode_air_date"])
-            predicted = datetime(air.year, air.month, air.day) + timedelta(hours=pat["median_delay_hours"])
+            predicted = datetime(air.year, air.month, air.day, median_hour, 0) + timedelta(hours=pat["median_delay_hours"])
             if predicted - timedelta(hours=6) <= now <= predicted + timedelta(hours=36):
                 interval = min(interval, 1.0)
         except ValueError:
@@ -1374,8 +1394,7 @@ async def auto_clean_job():
 
 def schedule_auto_clean_job():
     scheduler.add_job(auto_clean_job, "interval", hours=6,
-                      id="auto_clean", replace_existing=True,
-                      max_instances=1, coalesce=True)
+                      id="auto_clean", replace_existing=True, max_instances=1, coalesce=True)
 
 
 @app.on_event("startup")
@@ -1392,7 +1411,6 @@ async def on_startup():
 @app.on_event("shutdown")
 async def on_shutdown():
     scheduler.shutdown()
-
 
 def escape_ics(s):
     if not s:
@@ -1581,6 +1599,17 @@ async def img_proxy(url: str):
         return Response(status_code=502)
 
 
+@app.get("/manifest.json")
+async def get_manifest():
+    return FileResponse(STATIC_DIR / "manifest.json", media_type="application/manifest+json")
+
+
+@app.get("/sw.js")
+async def get_sw():
+    return Response(content=(STATIC_DIR / "sw.js").read_text(encoding="utf-8"),
+                    media_type="application/javascript")
+
+
 async def check_distribution_now(title_external_id):
     dist = get_distribution(title_external_id)
     if not dist:
@@ -1603,7 +1632,7 @@ async def check_distribution_now(title_external_id):
         except (RuTrackerAuthError, RuTrackerForbiddenError, KinozalAuthError, KinozalForbiddenError) as e:
             db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name=?", (str(e), dist["tracker_name"]), write=True)
             return False, str(e)
-        except (RuTrackerError, KinozalError) as e:
+        except (RuTrackerError, RutorError, KinozalError) as e:
             db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name=?", (str(e), dist["tracker_name"]), write=True)
             return False, str(e)
         db("UPDATE tracker_credentials SET encrypted_cookies=?, last_login_at=datetime('now'), last_error=NULL, error_count=0 WHERE tracker_name=?",
@@ -1622,12 +1651,12 @@ async def check_distribution_now(title_external_id):
                 return False, f"Ошибка: {e} (повторная: {re_})"
         else:
             return False, f"{e} Обновите cookies в настройках."
-    except (RuTrackerError, KinozalError) as e:
+    except (RuTrackerError, RutorError, KinozalError) as e:
         db("UPDATE distributions SET status='error', error_message=? WHERE id=?", (str(e), dist["id"]), write=True)
         return False, str(e)
     if not files:
         db("UPDATE distributions SET status='error', error_message='Не удалось распарсить список файлов (debug-дамп сохранён)' WHERE id=?", (dist["id"],), write=True)
-        return False, "Не удалось распарсить список файлов. Debug-дамп: /data/debug_last_topic.html"
+        return False, "Не удалось распарсить список файлов. Debug-дамп сохранён."
     snapshot = sorted([(f["name"], f["size"]) for f in files])
     new_hash = hashlib.md5(json.dumps(snapshot, ensure_ascii=False).encode()).hexdigest()
     old_hash = dist["last_files_hash"]
@@ -1662,8 +1691,7 @@ async def check_distribution_now(title_external_id):
                       (distribution_id, file_name, file_size, transmission_hash,
                        episode_season, episode_number, sent_at)
                       VALUES (?,?,?,?,?,?,datetime('now'))""",
-                   (dist["id"], result["name"], result["size"], result["hash"],
-                    ep_s, ep_n), write=True)
+                   (dist["id"], result["name"], result["size"], result["hash"], ep_s, ep_n), write=True)
                 cr = db("SELECT title FROM titles WHERE external_id=?", (title_external_id,))
                 await notify_torrent_started(cr[0]["title"] if cr else title_external_id, result["name"], dd)
                 await maybe_notify_season_completed(title_external_id, result["name"])
@@ -1796,8 +1824,7 @@ async def download_distribution(title_external_id: str, sort: str = "date"):
         cr = db("SELECT title FROM titles WHERE external_id=?", (title_external_id,))
         await notify_torrent_started(cr[0]["title"] if cr else title_external_id, result["name"], dd)
         await maybe_notify_season_completed(title_external_id, result["name"])
-        set_setting("last_dist_download",
-                    f"✅ Отправлено: {result['name']} ({format_size(result['size'])})")
+        set_setting("last_dist_download", f"✅ Отправлено: {result['name']} ({format_size(result['size'])})")
         return RedirectResponse(f"/?sort={sort}&msg=dist-downloaded", status_code=303)
     except Exception as e:
         traceback.print_exc()
@@ -1910,6 +1937,8 @@ async def index(request: Request, sort: str = "date", err: str | None = None, ms
             c.update(distribution_url=dist["url"], distribution_download_path=dist["download_path"],
                      distribution_mode=dist["mode"], distribution_check_interval_hours=dist["check_interval_hours"],
                      distribution_tracker=dist["tracker_name"])
+            if dist.get("next_episode_air_date"):
+                c["next_episode_date_human"] = human_date(dist["next_episode_air_date"])
             pat = get_pattern(dist["id"])
             if pat:
                 samples = json.loads(pat["samples_json"] or "[]")
@@ -2020,13 +2049,14 @@ async def refresh_card(external_id: str, sort: str = "date"):
 async def settings_page(request: Request, msg: str | None = None):
     tracker_rt = get_tracker_credentials("rutracker")
     tracker_kz = get_tracker_credentials("kinozal")
+    tracker_ru = get_tracker_credentials("rutor")
     return templates.TemplateResponse(request, "settings.html", {
         "tg": get_telegram_settings(), "refresh_hours": get_refresh_hours(),
         "refresh_label": refresh_period_label(get_refresh_hours()),
         "log_rows": [dict(r) for r in db("SELECT * FROM updates_log ORDER BY created_at DESC LIMIT 200")],
         "proxy_url": get_setting("proxy_url", "") or "", "theme": get_setting("theme", "dark"),
         "trans": get_transmission_settings(),
-        "tracker_rt": tracker_rt, "tracker_kz": tracker_kz,
+        "tracker_rt": tracker_rt, "tracker_kz": tracker_kz, "tracker_ru": tracker_ru,
         "tracker_rt_has_cookies": bool(tracker_rt and tracker_rt.get("encrypted_cookies") and decrypt_value(tracker_rt["encrypted_cookies"])),
         "tracker_kz_has_cookies": bool(tracker_kz and tracker_kz.get("encrypted_cookies") and decrypt_value(tracker_kz["encrypted_cookies"])),
         "message": {"refresh-saved": "Период обновления сохранён.", "telegram-saved": "Настройки Telegram сохранены.",
@@ -2217,14 +2247,13 @@ async def save_tracker(tracker_name: str = Form("rutracker"), username: str = Fo
 
 
 @app.post("/distribution/add")
-async def add_distribution(title_external_id: str = Form(...),
-                           tracker_name: str = Form("rutracker"),
-                           url: str = Form(...), download_path: str = Form(""),
-                           mode: str = Form("smart"), check_interval_hours: int = Form(6)):
-    existing = get_distribution(title_external_id)
-    torrent_id = parse_torrent_id(url)
-    if not torrent_id:
+async def add_distribution(title_external_id: str = Form(...), url: str = Form(...),
+                           download_path: str = Form(""), mode: str = Form("smart"),
+                           check_interval_hours: int = Form(6)):
+    tracker_name, torrent_id = parse_torrent_url(url)
+    if not torrent_id or not tracker_name:
         return RedirectResponse("/?msg=dist-invalid-url", status_code=303)
+    existing = get_distribution(title_external_id)
     if mode not in ("smart", "fixed"):
         mode = "smart"
     if existing:
@@ -2275,6 +2304,36 @@ async def toggle_notify(external_id: str, sort: str = "date"):
 async def notify_all(state: str, sort: str = "date"):
     db("UPDATE titles SET notify_enabled=?", (1 if state == "on" else 0,), write=True)
     return RedirectResponse(f"/?sort={sort}", status_code=303)
+
+
+@app.get("/recommendations", response_class=HTMLResponse)
+async def recommendations_page(request: Request, msg: str | None = None):
+    watched_shows = db("""SELECT DISTINCT t.external_id, t.title, t.poster_url
+                          FROM watched_episodes w
+                          JOIN titles t ON w.title_external_id = t.external_id
+                          WHERE t.type = 'series' LIMIT 10""")
+    return templates.TemplateResponse(request, "recommendations.html",
+                                      {"watched": [dict(r) for r in watched_shows], "msg": msg})
+
+
+@app.post("/recommendations/similar/{external_id}")
+async def add_similar(external_id: str):
+    src = SOURCES["tmdb"]
+    tmdb_id = parse_tmdb_id(external_id)
+    if tmdb_id is None:
+        return RedirectResponse("/recommendations?msg=similar-fail", status_code=303)
+    try:
+        data = await src._get(f"/tv/{tmdb_id}/similar")
+        results = data.get("results", [])[:5]
+        for r in results:
+            info = await src.fetch(f"tmdb:tv:{r['id']}")
+            if info:
+                db("INSERT OR IGNORE INTO titles (external_id, title, type, release_date, poster_url, genres, source, updated_at) VALUES (?,?,?,?,?,?,?,datetime('now'))",
+                   (info["external_id"], info["title"], info["type"], info["release_date"],
+                    await download_card_poster(info), info["genres"], "tmdb"), write=True)
+        return RedirectResponse("/recommendations?msg=similar-added", status_code=303)
+    except Exception:
+        return RedirectResponse("/recommendations?msg=similar-fail", status_code=303)
 
 
 @app.get("/title/{external_id}", response_class=HTMLResponse)

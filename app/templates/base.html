@@ -1,143 +1,117 @@
-<!doctype html>
-<html lang="ru">
+<!DOCTYPE html>
+<html lang="ru" data-theme="{{ get_theme() }}">
 
 <head>
-    <meta charset="utf-8">
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#12141a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/static/icon.svg">
     <title>{% block title %}Movie Radar{% endblock %}</title>
     <style>
         :root,
-        body[data-theme="dark"] {
-            --bg: #10131a;
-            --bg-card: #1a1f2b;
-            --bg-sidebar: #0c0f14;
-            --bg-input: #1a1f2b;
-            --bg-hover: #2a3140;
-            --bg-section: #1a1f2b;
-            --text: #e9ecf3;
-            --text-muted: #9aa3b8;
-            --text-dim: #6a7389;
-            --text-faint: #5a6378;
-            --border: #2a3140;
-            --border-light: #343d4f;
+        [data-theme="dark"] {
+            --bg: #12141a;
+            --bg-card: #1a1d26;
+            --bg-hover: #232734;
+            --bg-section: #1a1d26;
+            --text: #e8eaf0;
+            --text-muted: #9aa1b0;
+            --text-faint: #6b7280;
+            --text-dim: #565d6b;
             --accent: #4f8cff;
-            --accent-hover: #3a78eb;
-            --accent-bg: #274067;
-            --accent-text: #bcd4ff;
-            --success: #7bd88f;
-            --error: #ff7b7b;
-            --warning-bg: #3a2a2a;
-            --warning-text: #ffb4b4;
-            --overlay: rgba(0, 0, 0, .55);
+            --accent-bg: rgba(79, 140, 255, .15);
+            --accent-text: #8ab4ff;
+            --border: #2a2f3d;
+            --border-light: #3a4152;
+            --success: #3ddc84;
+            --warning-bg: rgba(245, 166, 35, .15);
+            --warning-text: #f5a623;
+            --error: #ff5c5c;
+            --delete-btn-bg: #a33;
+            --delete-btn-hover: #c44;
+            --refresh-btn-bg: #3a4152;
+            --refresh-btn-hover: #4a5162;
+            --no-poster-bg: #232734;
+            --no-poster-text: #6b7280;
             --tag-bg: rgba(0, 0, 0, .6);
-            --no-poster-bg: #232a39;
-            --no-poster-text: #8b93a7;
-            --code-bg: #0c0f14;
-            --progress-bg: #2a3140;
-            --refresh-btn-bg: rgba(79, 140, 255, .75);
-            --refresh-btn-hover: rgba(79, 140, 255, .95);
-            --delete-btn-bg: rgba(0, 0, 0, .55);
-            --delete-btn-hover: rgba(255, 80, 80, .75);
+            --progress-bg: #232734;
+            --code-bg: #232734;
         }
 
-        body[data-theme="light"] {
-            --bg: #f5f6f8;
-            --bg-card: #ffffff;
-            --bg-sidebar: #e8eaed;
-            --bg-input: #ffffff;
-            --bg-hover: #d5d9e0;
-            --bg-section: #ffffff;
-            --text: #1a1d24;
-            --text-muted: #5a6378;
-            --text-dim: #7a8296;
-            --text-faint: #8b93a7;
-            --border: #d0d4dc;
-            --border-light: #c0c5d0;
+        [data-theme="light"] {
+            --bg: #f4f6fa;
+            --bg-card: #fff;
+            --bg-hover: #e8ecf3;
+            --bg-section: #fff;
+            --text: #1a1d26;
+            --text-muted: #565d6b;
+            --text-faint: #8a91a0;
+            --text-dim: #a0a7b5;
             --accent: #2563eb;
-            --accent-hover: #1d4ed8;
-            --accent-bg: #dbeafe;
-            --accent-text: #1e40af;
+            --accent-bg: rgba(37, 99, 235, .12);
+            --accent-text: #2563eb;
+            --border: #dde2ea;
+            --border-light: #c6cdd9;
             --success: #16a34a;
+            --warning-bg: rgba(217, 119, 6, .12);
+            --warning-text: #b45309;
             --error: #dc2626;
-            --warning-bg: #fee2e2;
-            --warning-text: #991b1b;
-            --overlay: rgba(0, 0, 0, .35);
+            --delete-btn-bg: #dc2626;
+            --delete-btn-hover: #b91c1c;
+            --refresh-btn-bg: #dde2ea;
+            --refresh-btn-hover: #c6cdd9;
+            --no-poster-bg: #e8ecf3;
+            --no-poster-text: #8a91a0;
             --tag-bg: rgba(0, 0, 0, .5);
-            --no-poster-bg: #e5e7eb;
-            --no-poster-text: #9ca3af;
-            --code-bg: #e5e7eb;
-            --progress-bg: #d1d5db;
-            --refresh-btn-bg: rgba(37, 99, 235, .75);
-            --refresh-btn-hover: rgba(37, 99, 235, .95);
-            --delete-btn-bg: rgba(0, 0, 0, .35);
-            --delete-btn-hover: rgba(220, 38, 38, .75);
+            --progress-bg: #e8ecf3;
+            --code-bg: #e8ecf3;
         }
 
         * {
             box-sizing: border-box;
-            margin: 0;
         }
 
         body {
+            margin: 0;
             background: var(--bg);
             color: var(--text);
-            font: 16px/1.4 system-ui, sans-serif;
-            transition: background .2s, color .2s;
-        }
-
-        a {
-            color: var(--accent);
-        }
-
-        .layout {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             display: flex;
             min-height: 100vh;
         }
 
         .sidebar {
-            width: 240px;
-            background: var(--bg-sidebar);
-            padding: 24px 16px;
-            border-right: 1px solid var(--border);
+            width: 200px;
             flex-shrink: 0;
+            background: var(--bg-card);
+            border-right: 1px solid var(--border);
+            padding: 16px 0;
             position: sticky;
             top: 0;
             height: 100vh;
-            overflow-y: auto;
         }
 
-        .sidebar .brand {
-            display: block;
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 28px;
-            padding: 6px 10px;
-            text-decoration: none;
-            color: var(--text);
-            border-radius: 8px;
-            transition: background .15s, color .15s;
-        }
-
-        .sidebar .brand:hover {
-            background: var(--bg-hover);
+        .sidebar .logo {
+            padding: 0 16px 16px;
+            font-size: 17px;
+            font-weight: 700;
             color: var(--accent);
         }
 
         .sidebar nav {
             display: flex;
             flex-direction: column;
-            gap: 4px;
         }
 
         .sidebar nav a {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 10px 12px;
-            border-radius: 8px;
-            text-decoration: none;
+            padding: 10px 16px;
             color: var(--text-muted);
-            font-size: 15px;
+            text-decoration: none;
+            font-size: 14px;
         }
 
         .sidebar nav a:hover {
@@ -147,104 +121,118 @@
 
         .sidebar nav a.active {
             background: var(--accent-bg);
-            color: var(--text);
+            color: var(--accent-text);
         }
 
-        .content {
+        .main {
             flex: 1;
-            padding: 24px;
-            max-width: 1200px;
+            padding: 20px 24px;
+            max-width: 1400px;
         }
 
-        h1.page-title {
-            font-size: 24px;
-            margin-bottom: 20px;
+        .page-title {
+            font-size: 22px;
+            margin: 0 0 16px;
         }
 
-        .error {
-            color: var(--error);
-            margin: 8px 0;
-        }
-
-        .message {
-            color: var(--success);
-            margin: 8px 0;
+        a {
+            color: var(--accent);
         }
 
         button {
-            padding: 10px 18px;
-            border: 0;
-            border-radius: 8px;
-            background: var(--accent);
-            color: #fff;
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        button:hover {
-            background: var(--accent-hover);
+            font-family: inherit;
         }
 
         button.secondary {
+            padding: 8px 14px;
+            border-radius: 8px;
+            border: 1px solid var(--border-light);
             background: var(--bg-hover);
             color: var(--text);
+            font-size: 13px;
+            cursor: pointer;
         }
 
         button.secondary:hover {
             background: var(--border-light);
         }
 
-        button.small {
-            padding: 6px 12px;
-            font-size: 13px;
+        button.secondary.small {
+            padding: 6px 10px;
+            font-size: 12px;
         }
 
         input,
-        select {
-            padding: 10px 12px;
-            border-radius: 8px;
-            border: 1px solid var(--border);
-            background: var(--bg-input);
+        select,
+        textarea {
+            background: var(--bg-hover);
             color: var(--text);
-            font-size: 15px;
+            border: 1px solid var(--border-light);
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 14px;
         }
 
-        input[type=checkbox] {
-            width: 20px;
-            height: 20px;
+        input:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+            border-color: var(--accent);
         }
 
-        @media (max-width: 768px) {
-            .layout {
+        .message {
+            background: var(--accent-bg);
+            color: var(--accent-text);
+            padding: 10px 14px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 14px;
+        }
+
+        .error {
+            background: var(--warning-bg);
+            color: var(--warning-text);
+            padding: 10px 14px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 14px;
+        }
+
+        .empty {
+            color: var(--text-muted);
+        }
+
+        .hint {
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        @media (max-width:700px) {
+            body {
                 flex-direction: column;
             }
 
             .sidebar {
                 width: 100%;
-                border-right: 0;
-                border-bottom: 1px solid var(--border);
-                padding: 14px 12px;
-                position: static;
                 height: auto;
+                position: static;
+            }
+
+            .sidebar .logo {
+                display: none;
             }
 
             .sidebar nav {
                 flex-direction: row;
-                gap: 4px;
+                overflow-x: auto;
+                width: 100%;
             }
 
             .sidebar nav a {
-                flex: 1;
-                justify-content: center;
-                padding: 8px 10px;
-                font-size: 13px;
+                white-space: nowrap;
             }
 
-            .sidebar .brand {
-                display: none;
-            }
-
-            .content {
+            .main {
                 padding: 16px;
             }
         }
@@ -252,21 +240,26 @@
     {% block extra_css %}{% endblock %}
 </head>
 
-<body data-theme="{{ get_theme() }}">
-    <div class="layout">
-        <aside class="sidebar">
-            <a href="/" class="brand">🎬 Movie Radar</a>
-            <nav>
-                <a href="/" class="{% if request.url.path == '/' %}active{% endif %}">📋 Список</a>
-                <a href="/new" class="{% if request.url.path == '/new' %}active{% endif %}">➕ Добавить</a>
-                <a href="/downloads" class="{% if request.url.path == '/downloads' %}active{% endif %}">📥 Загрузки</a>
-                <a href="/settings" class="{% if request.url.path == '/settings' %}active{% endif %}">⚙ Настройки</a>
-            </nav>
-        </aside>
-        <main class="content">
-            {% block content %}{% endblock %}
-        </main>
-    </div>
+<body>
+    <aside class="sidebar">
+        <div class="logo">🎬 Movie Radar</div>
+        <nav>
+            <a href="/" class="{% if request.url.path == '/' %}active{% endif %}">📋 Список</a>
+            <a href="/new" class="{% if request.url.path == '/new' %}active{% endif %}">➕ Добавить</a>
+            <a href="/downloads" class="{% if request.url.path == '/downloads' %}active{% endif %}">📥 Загрузки</a>
+            <a href="/recommendations" class="{% if request.url.path == '/recommendations' %}active{% endif %}">💡
+                Предложения</a>
+            <a href="/settings" class="{% if request.url.path == '/settings' %}active{% endif %}">⚙ Настройки</a>
+        </nav>
+    </aside>
+    <main class="main">
+        {% block content %}{% endblock %}
+    </main>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
+        }
+    </script>
     {% block extra_js %}{% endblock %}
 </body>
 

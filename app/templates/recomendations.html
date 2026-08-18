@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Предложения{% endblock %}
+
+{% block extra_css %}
+<style>
+    .rec-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 16px;
+    }
+
+    .rec-card {
+        background: var(--bg-card);
+        border-radius: 12px;
+        overflow: hidden;
+    }
+
+    .rec-card img {
+        width: 100%;
+        aspect-ratio: 2/3;
+        object-fit: cover;
+        display: block;
+    }
+
+    .rec-info {
+        padding: 12px;
+    }
+
+    .rec-title {
+        font-size: 15px;
+        margin-bottom: 8px;
+        font-weight: 600;
+    }
+
+    .rec-btn {
+        width: 100%;
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--accent);
+        background: var(--accent-bg);
+        color: var(--accent-text);
+        font-size: 13px;
+        cursor: pointer;
+    }
+
+    .rec-btn:hover {
+        background: var(--accent);
+        color: #fff;
+    }
+
+    .no-poster {
+        width: 100%;
+        aspect-ratio: 2/3;
+        background: var(--no-poster-bg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--no-poster-text);
+        font-size: 12px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1 class="page-title">💡 Предложения</h1>
+
+{% if msg == 'similar-added' %}<p class="message">Похожие сериалы добавлены в каталог.</p>{% endif %}
+{% if msg == 'similar-fail' %}<p class="error">Не удалось получить похожие сериалы.</p>{% endif %}
+
+<p class="hint" style="margin-bottom:16px">
+    На основе сериалов, которые вы отметили как просмотренные, предлагаем похожие (TMDB «Similar TV shows»).
+</p>
+
+{% if watched %}
+<div class="rec-list">
+    {% for w in watched %}
+    <div class="rec-card">
+        {% if w.poster_url %}<img src="{{ w.poster_url }}" alt="{{ w.title }}">
+        {% else %}<div class="no-poster">нет постера</div>{% endif %}
+        <div class="rec-info">
+            <div class="rec-title">{{ w.title }}</div>
+            <form method="post" action="/recommendations/similar/{{ w.external_id }}">
+                <button type="submit" class="rec-btn">➕ Добавить похожие</button>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p class="empty">Отметьте сериалы как просмотренные, чтобы получить рекомендации.</p>
+{% endif %}
+{% endblock %}
