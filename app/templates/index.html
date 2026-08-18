@@ -139,7 +139,7 @@
         font-size: 12px;
     }
 
-    .row.badge {
+    .row.badge-row {
         min-height: 1.7em;
     }
 
@@ -453,12 +453,6 @@
         margin: 0;
     }
 
-    .modal-actions {
-        display: flex;
-        gap: 8px;
-        margin-top: 16px;
-    }
-
     .learn-stat {
         display: flex;
         justify-content: space-between;
@@ -481,7 +475,6 @@
         padding: 3px 0;
     }
 
-    /* Одинаковые кнопки обучения */
     .learn-actions {
         display: flex;
         gap: 8px;
@@ -555,7 +548,7 @@
             </div>
             <div class="row watch">{% if c.watch_label %}📊 {{ c.watch_label }} эп. ({{ c.watch_percent }}%){% endif %}
             </div>
-            <div class="row badge">{% if c.badge %}<span class="badge {{ 'out' if c.released else '' }}">{{ c.badge
+            <div class="row badge-row">{% if c.badge %}<span class="badge {{ 'out' if c.released else '' }}">{{ c.badge
                     }}</span>{% endif %}</div>
             <div class="row updated">{% if c.updated_at %}обновлено: {{ c.updated_at }}{% endif %}</div>
         </div>
@@ -650,9 +643,9 @@
                             <label>часов</label>
                         </div>
                     </div>
-                    <div class="modal-actions">
-                        <button type="submit">Сохранить</button>
-                        <button type="button" class="secondary" id="dist-modal-cancel">Отмена</button>
+                    <div class="learn-actions">
+                        <button type="submit" class="learn-btn">Сохранить</button>
+                        <button type="button" class="learn-btn" id="dist-modal-cancel">Отмена</button>
                     </div>
                 </form>
             </div>
