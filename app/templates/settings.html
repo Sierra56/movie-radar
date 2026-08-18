@@ -309,6 +309,11 @@
                 tg.get('notify_torrent_completed', 1) %}checked{% endif %}>
             <label for="notify_torrent_completed">✅ Уведомлять о завершении скачивания торрента</label>
         </div>
+        <div class="check-row">
+            <input type="checkbox" name="notify_season_completed" id="notify_season_completed" {% if
+                tg.get('notify_season_completed', 1) %}checked{% endif %}>
+            <label for="notify_season_completed">🏁 Уведомлять о завершении сезона</label>
+        </div>
         <div class="field">
             <label>Время отправки ежедневной рассылки</label>
             <input type="time" name="send_time" value="{{ tg.get('send_time', '09:00') }}">
@@ -344,6 +349,8 @@
                 class="secondary small">📥 Торрент-старт</button></form>
         <form method="post" action="/settings/telegram/test/torrent-completed"><button type="submit"
                 class="secondary small">✅ Торрент-готов</button></form>
+        <form method="post" action="/settings/telegram/test/season-completed"><button type="submit"
+                class="secondary small">🏁 Сезон завершён</button></form>
         <form method="post" action="/settings/telegram/test/daily"><button type="submit" class="secondary small">🔔
                 Рассылка</button></form>
     </div>
@@ -427,6 +434,32 @@
                 но выше нагрузка на трекер.</p>
         </div>
 
+        <h3>📥 Опрос Transmission</h3>
+        <div class="field">
+            <label>Интервал опроса Transmission (минуты)</label>
+            <input type="number" name="transmission_poll_minutes"
+                value="{{ trans.get('transmission_poll_minutes', 3) }}" min="1" max="60">
+            <p class="hint">Как часто проверять статус загрузок для уведомлений о завершении.</p>
+        </div>
+
+        <h3>🧹 Автоочистка</h3>
+        <div class="check-row">
+            <input type="checkbox" name="auto_clean_enabled" id="auto-clean-enabled" {% if
+                trans.get('auto_clean_enabled') %}checked{% endif %}>
+            <label for="auto-clean-enabled">Включить автоочистку торрентов из Transmission</label>
+        </div>
+        <div class="field">
+            <label>Удалять завершённые через (дней)</label>
+            <input type="number" name="auto_clean_days" value="{{ trans.get('auto_clean_days', 30) }}" min="1"
+                max="365">
+            <p class="hint">Торренты, которые были завершены более N дней назад, будут удалены вместе с файлами.</p>
+        </div>
+        <div class="check-row">
+            <input type="checkbox" name="auto_clean_on_watch" id="auto-clean-watch" {% if
+                trans.get('auto_clean_on_watch') %}checked{% endif %}>
+            <label for="auto-clean-watch">Удалять эпизод после отметки «просмотрено»</label>
+        </div>
+
         <div class="check-row">
             <input type="checkbox" name="filter_recent_only" id="filter-recent" {% if trans.get('filter_recent_only', 1)
                 %}checked{% endif %}>
@@ -461,10 +494,10 @@
     <form method="post" action="/settings/tracker">
         <input type="hidden" name="tracker_name" value="rutracker">
         <div class="check-row">
-            <input type="checkbox" name="enabled" id="tracker-enabled" {% if tracker and tracker.get('enabled')
+            <input type="checkbox" name="enabled" id="tracker-enabled" {% if tracker_rt and tracker_rt.get('enabled')
                 %}checked{% endif %}>
-            <label for="tracker-enabled">Включить отслеживание раздач</label>
-            {% if tracker_has_cookies %}<span class="cookies-loaded-badge">✅ Cookies загружены</span>{% endif %}
+            <label for="tracker-enabled">Включить rutracker.org</label>
+            {% if tracker_rt_has_cookies %}<span class="cookies-loaded-badge">✅ Cookies загружены</span>{% endif %}
         </div>
 
         <h3>Способ 1: Ручной ввод cookies (рекомендуется)</h3>
@@ -475,20 +508,65 @@
         </div>
         <div class="field">
             <label>User-Agent вашего браузера (обязательно)</label>
-            <input type="text" name="user_agent" value="{{ tracker.get('user_agent', '') if tracker else '' }}">
+            <input type="text" name="user_agent" value="{{ tracker_rt.get('user_agent', '') if tracker_rt else '' }}">
         </div>
 
         <h3>Способ 2: Логин/пароль (fallback)</h3>
         <div class="two-col">
             <div class="field"><label>Логин</label><input type="text" name="username"
-                    value="{{ tracker.get('username', '') if tracker else '' }}"></div>
+                    value="{{ tracker_rt.get('username', '') if tracker_rt else '' }}"></div>
             <div class="field"><label>Пароль</label><input type="password" name="password" placeholder="••••••••"></div>
         </div>
 
-        {% if tracker and tracker.get('last_error') %}<p class="status-line err">Последняя ошибка: {{
-            tracker['last_error'] }}</p>{% endif %}
-        {% if tracker and tracker.get('last_login_at') %}<p class="status-line ok">Последний успешный доступ: {{
-            tracker['last_login_at'] }}</p>{% endif %}
+        {% if tracker_rt and tracker_rt.get('last_error') %}<p class="status-line err">Последняя ошибка: {{
+            tracker_rt['last_error'] }}</p>{% endif %}
+        {% if tracker_rt and tracker_rt.get('last_login_at') %}<p class="status-line ok">Последний успешный доступ: {{
+            tracker_rt['last_login_at'] }}</p>{% endif %}
+
+        <div class="btn-row">
+            <button type="submit">Сохранить</button>
+            <button type="submit" formaction="/settings/tracker/test" class="secondary">🔑 Проверить
+                подключение</button>
+        </div>
+    </form>
+</div>
+
+<div class="section">
+    <h2>🎬 Торрент-трекер: kinozal.me</h2>
+    <div class="warning-box">
+        <p><strong>ℹ️ kinozal.me</strong> — резервный трекер для случаев, когда раздача недоступна на rutracker или
+            заблокирована Cloudflare.</p>
+    </div>
+    <form method="post" action="/settings/tracker">
+        <input type="hidden" name="tracker_name" value="kinozal">
+        <div class="check-row">
+            <input type="checkbox" name="enabled" id="kz-enabled" {% if tracker_kz and tracker_kz.get('enabled')
+                %}checked{% endif %}>
+            <label for="kz-enabled">Включить kinozal.me</label>
+            {% if tracker_kz_has_cookies %}<span class="cookies-loaded-badge">✅ Cookies загружены</span>{% endif %}
+        </div>
+
+        <h3>Способ 1: Ручной ввод cookies (рекомендуется)</h3>
+        <div class="field">
+            <label>Cookies из браузера</label>
+            <textarea name="cookies_manual" rows="4" placeholder="uid=...; pass=...; ..."></textarea>
+        </div>
+        <div class="field">
+            <label>User-Agent вашего браузера (обязательно)</label>
+            <input type="text" name="user_agent" value="{{ tracker_kz.get('user_agent', '') if tracker_kz else '' }}">
+        </div>
+
+        <h3>Способ 2: Логин/пароль (fallback)</h3>
+        <div class="two-col">
+            <div class="field"><label>Логин</label><input type="text" name="username"
+                    value="{{ tracker_kz.get('username', '') if tracker_kz else '' }}"></div>
+            <div class="field"><label>Пароль</label><input type="password" name="password" placeholder="••••••••"></div>
+        </div>
+
+        {% if tracker_kz and tracker_kz.get('last_error') %}<p class="status-line err">Последняя ошибка: {{
+            tracker_kz['last_error'] }}</p>{% endif %}
+        {% if tracker_kz and tracker_kz.get('last_login_at') %}<p class="status-line ok">Последний успешный доступ: {{
+            tracker_kz['last_login_at'] }}</p>{% endif %}
 
         <div class="btn-row">
             <button type="submit">Сохранить</button>

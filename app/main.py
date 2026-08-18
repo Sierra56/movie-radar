@@ -25,9 +25,9 @@ from fastapi.templating import Jinja2Templates
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from .rutracker import (RuTrackerClient, RuTrackerError,
-                        RuTrackerCaptchaError, RuTrackerAuthError,
-                        RuTrackerForbiddenError)
+from .rutracker import (RuTrackerClient, RuTrackerError, RuTrackerCaptchaError,
+                        RuTrackerAuthError, RuTrackerForbiddenError, BaseTracker)
+from .kinozal import (KinozalClient, KinozalError, KinozalAuthError, KinozalForbiddenError)
 from .transmission import TransmissionClient
 
 OMDB_KEY = os.getenv("OMDB_API_KEY", "")
@@ -56,7 +56,6 @@ TORRENT_TABLES = ["tracker_credentials", "transmission_settings",
 ENCRYPTION_KEY_PATH = os.path.join(os.path.dirname(DB_PATH), "encryption.key")
 
 
-# ── Encryption ────────────────────────────────────────
 def get_encryption_key() -> bytes:
     if os.path.exists(ENCRYPTION_KEY_PATH):
         with open(ENCRYPTION_KEY_PATH, "rb") as f:
@@ -88,7 +87,6 @@ def decrypt_value(value: str) -> str:
         return ""
 
 
-# ── Image helpers ─────────────────────────────────────
 def sanitize_id(external_id: str) -> str:
     return external_id.replace(":", "_").replace("/", "_")
 
@@ -157,7 +155,6 @@ def ensure_proxied(url: str | None) -> str | None:
     return f"/img-proxy?url={quote(url, safe='')}"
 
 
-# ── Sources ───────────────────────────────────────────
 class Source(ABC):
     name: str = ""
 
@@ -326,7 +323,6 @@ class TmdbSource(Source):
 SOURCES = {"omdb": OmdbSource(), "tmdb": TmdbSource()}
 
 
-# ── SQLite ────────────────────────────────────────────
 def db(sql, params=(), write=False):
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with closing(sqlite3.connect(DB_PATH)) as conn:
@@ -356,10 +352,11 @@ def ensure_schema():
             notify_date_changes INTEGER DEFAULT 1, notify_new_cards INTEGER DEFAULT 1,
             notify_new_seasons INTEGER DEFAULT 1, notify_new_episodes INTEGER DEFAULT 1,
             notify_torrent_started INTEGER DEFAULT 1, notify_torrent_completed INTEGER DEFAULT 1,
-            last_sent TEXT)""", write=True)
+            notify_season_completed INTEGER DEFAULT 1, last_sent TEXT)""", write=True)
     db("INSERT OR IGNORE INTO telegram_settings (id) VALUES (1)", write=True)
     for col in ("notify_date_changes", "notify_new_cards", "notify_new_seasons",
-                "notify_new_episodes", "notify_torrent_started", "notify_torrent_completed"):
+                "notify_new_episodes", "notify_torrent_started", "notify_torrent_completed",
+                "notify_season_completed"):
         try:
             db(f"ALTER TABLE telegram_settings ADD COLUMN {col} INTEGER DEFAULT 1", write=True)
         except sqlite3.OperationalError:
@@ -402,11 +399,15 @@ def ensure_schema():
             default_check_interval INTEGER DEFAULT 6,
             default_download_behavior TEXT DEFAULT 'use_distribution_path',
             auto_download_new_files INTEGER DEFAULT 0, auto_check_enabled INTEGER DEFAULT 1,
-            auto_check_tick_minutes INTEGER DEFAULT 10, transmission_poll_minutes INTEGER DEFAULT 3)""", write=True)
+            auto_check_tick_minutes INTEGER DEFAULT 10, transmission_poll_minutes INTEGER DEFAULT 3,
+            auto_clean_enabled INTEGER DEFAULT 0, auto_clean_days INTEGER DEFAULT 30,
+            auto_clean_on_watch INTEGER DEFAULT 0)""", write=True)
     db("INSERT OR IGNORE INTO transmission_settings (id) VALUES (1)", write=True)
     for col in ("default_download_behavior TEXT DEFAULT 'use_distribution_path'",
                 "auto_download_new_files INTEGER DEFAULT 0", "auto_check_enabled INTEGER DEFAULT 1",
-                "auto_check_tick_minutes INTEGER DEFAULT 10", "transmission_poll_minutes INTEGER DEFAULT 3"):
+                "auto_check_tick_minutes INTEGER DEFAULT 10", "transmission_poll_minutes INTEGER DEFAULT 3",
+                "auto_clean_enabled INTEGER DEFAULT 0", "auto_clean_days INTEGER DEFAULT 30",
+                "auto_clean_on_watch INTEGER DEFAULT 0"):
         try:
             db(f"ALTER TABLE transmission_settings ADD COLUMN {col}", write=True)
         except sqlite3.OperationalError:
@@ -428,12 +429,13 @@ def ensure_schema():
     db("""CREATE TABLE IF NOT EXISTS download_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT, distribution_id INTEGER, file_name TEXT,
             file_size INTEGER, transmission_hash TEXT, sent_at TEXT DEFAULT (datetime('now')),
-            completed_at TEXT,
+            completed_at TEXT, episode_season INTEGER, episode_number INTEGER,
             FOREIGN KEY (distribution_id) REFERENCES distributions(id) ON DELETE CASCADE)""", write=True)
-    try:
-        db("ALTER TABLE download_history ADD COLUMN completed_at TEXT", write=True)
-    except sqlite3.OperationalError:
-        pass
+    for col in ("completed_at TEXT", "episode_season INTEGER", "episode_number INTEGER"):
+        try:
+            db(f"ALTER TABLE download_history ADD COLUMN {col}", write=True)
+        except sqlite3.OperationalError:
+            pass
 
     db("""CREATE TABLE IF NOT EXISTS distribution_patterns (
             distribution_id INTEGER PRIMARY KEY, samples_json TEXT DEFAULT '[]',
@@ -455,7 +457,6 @@ def ensure_schema():
 ensure_schema()
 
 
-# ── Settings helpers ──────────────────────────────────
 def get_setting(key, default=None):
     rows = db("SELECT value FROM settings WHERE key=?", (key,))
     return rows[0]["value"] if rows else default
@@ -489,14 +490,15 @@ def get_telegram_settings():
 def save_telegram_settings(bot_token, chat_id, enabled, send_time, notify_days,
                            notify_date_changes, notify_new_cards, notify_new_seasons,
                            notify_new_episodes, notify_torrent_started=False,
-                           notify_torrent_completed=False):
+                           notify_torrent_completed=False, notify_season_completed=False):
     db("""UPDATE telegram_settings SET bot_token=?, chat_id=?, enabled=?, send_time=?, notify_days=?,
             notify_date_changes=?, notify_new_cards=?, notify_new_seasons=?, notify_new_episodes=?,
-            notify_torrent_started=?, notify_torrent_completed=? WHERE id=1""",
+            notify_torrent_started=?, notify_torrent_completed=?, notify_season_completed=? WHERE id=1""",
        (bot_token, chat_id, 1 if enabled else 0, send_time, notify_days,
         1 if notify_date_changes else 0, 1 if notify_new_cards else 0,
         1 if notify_new_seasons else 0, 1 if notify_new_episodes else 0,
-        1 if notify_torrent_started else 0, 1 if notify_torrent_completed else 0), write=True)
+        1 if notify_torrent_started else 0, 1 if notify_torrent_completed else 0,
+        1 if notify_season_completed else 0), write=True)
 
 
 def get_transmission_settings():
@@ -526,14 +528,22 @@ def load_tracker_cookies(tracker_name):
         return None
 
 
-def build_tracker_client(tracker_name="rutracker", cookies=None):
+def build_tracker_client(tracker_name: str = "rutracker",
+                         cookies: dict | None = None) -> BaseTracker:
     creds = get_tracker_credentials(tracker_name) or {}
+    username = creds.get("username", "")
+    password = decrypt_value(creds.get("encrypted_password", "")) if creds.get("encrypted_password") else ""
+    user_agent = creds.get("user_agent", "")
+    effective_cookies = cookies if cookies is not None else load_tracker_cookies(tracker_name)
+
+    if tracker_name == "kinozal":
+        return KinozalClient(
+            username=username, password=password, proxy=get_proxy_url(),
+            cookies=effective_cookies, user_agent=user_agent)
+
     return RuTrackerClient(
-        username=creds.get("username", ""),
-        password=decrypt_value(creds.get("encrypted_password", "")) if creds.get("encrypted_password") else "",
-        proxy=get_proxy_url(),
-        cookies=cookies if cookies is not None else load_tracker_cookies(tracker_name),
-        user_agent=creds.get("user_agent", ""))
+        username=username, password=password, proxy=get_proxy_url(),
+        cookies=effective_cookies, user_agent=user_agent)
 
 
 def build_transmission_client():
@@ -543,7 +553,6 @@ def build_transmission_client():
                               password=decrypt_value(trans.get("encrypted_password", "")) if trans.get("encrypted_password") else "")
 
 
-# ── Notification dedup ────────────────────────────────
 def was_notified_today(ntype, external_id, details=""):
     rows = db("SELECT 1 FROM sent_notifications WHERE notification_type=? AND external_id=? AND details=? AND sent_date=?",
               (ntype, external_id, details, date.today().isoformat()))
@@ -561,6 +570,7 @@ def cleanup_old_notifications(days_to_keep=7):
 
 
 templates.env.globals["get_theme"] = get_theme
+templates.env.globals["format_size"] = lambda x: "?" if not x else (f"{x / (1024**3):.2f} ГБ" if x > 1024**3 else f"{x / (1024**2):.1f} МБ")
 
 
 def log_update(external_id, title, field, old_value, new_value):
@@ -568,7 +578,6 @@ def log_update(external_id, title, field, old_value, new_value):
        (external_id, title, field, old_value, new_value), write=True)
 
 
-# ── Helpers ───────────────────────────────────────────
 def human_date(iso):
     if not iso:
         return None
@@ -628,10 +637,8 @@ def format_size(size_bytes):
         return "?"
     mb = size_bytes / (1024 * 1024)
     return f"{mb / 1024:.2f} ГБ" if mb > 1024 else f"{mb:.1f} МБ"
-templates.env.globals["format_size"] = format_size
 
 
-# ── Stage 5: episode parsing & learning ──────────────
 _EP_PATTERNS = [
     _re.compile(r"[Ss](\d{1,2})\s*[Ee](\d{1,3})"),
     _re.compile(r"(\d{1,2})\s*[xх]\s*(\d{1,3})"),
@@ -709,7 +716,6 @@ def record_learning_samples(dist, new_files):
     print(f"[learn] {dist['title_external_id']}: +{added} samples")
 
 
-# ── Seasons/episodes helpers ──────────────────────────
 async def save_seasons(title_external_id, seasons):
     existing = db("SELECT season_number, id FROM seasons WHERE title_external_id=?", (title_external_id,))
     emap = {r["season_number"]: r["id"] for r in existing}
@@ -776,7 +782,6 @@ def update_next_episode_air_date(external_id):
         db("UPDATE distributions SET next_episode_air_date=? WHERE id=?", (new_date, dist["id"]), write=True)
 
 
-# ── Watched helpers ───────────────────────────────────
 def is_watched(t, s, e):
     return bool(db("SELECT 1 FROM watched_episodes WHERE title_external_id=? AND season_number=? AND episode_number=?", (t, s, e)))
 
@@ -822,7 +827,6 @@ def get_show_progress(t):
     return (rows[0]["watched"] or 0, rows[0]["total"] or 0) if rows else (0, 0)
 
 
-# ── Telegram ──────────────────────────────────────────
 async def send_telegram(text):
     s = get_telegram_settings()
     if not s or not s.get("bot_token") or not s.get("chat_id"):
@@ -950,6 +954,55 @@ async def notify_torrent_completed(title, torrent_name, size_bytes, force=False)
     await send_telegram("\n".join(lines))
 
 
+async def notify_season_completed(show_title, season_number, force=False):
+    s = get_telegram_settings()
+    if not force and (not s or not s.get("enabled") or not s.get("notify_season_completed")):
+        return
+    if not s or not s.get("bot_token") or not s.get("chat_id"):
+        return
+    details = json.dumps({"season": season_number, "event": "completed"})
+    if not force and was_notified_today("season_completed", show_title, details):
+        return
+    mark_notified_today("season_completed", show_title, details)
+    lines = ["🏁 <b>Сезон завершён</b>", "", f"📺 <b>{show_title}</b> — Сезон {season_number}",
+             "Все эпизоды скачаны. Приятного просмотра!"]
+    await send_telegram("\n".join(lines))
+
+
+def get_season_episode_count(title_external_id, season_number):
+    rows = db("SELECT episodes FROM seasons WHERE title_external_id=? AND season_number=?",
+              (title_external_id, season_number))
+    return (rows[0]["episodes"] or 0) if rows else 0
+
+
+def check_season_completed(title_external_id, season_number):
+    expected = get_season_episode_count(title_external_id, season_number)
+    if not expected:
+        return False, 0, 0
+    rows = db("""SELECT COUNT(DISTINCT h.episode_number) as c FROM download_history h
+                 WHERE h.distribution_id IN (
+                     SELECT id FROM distributions WHERE title_external_id=?
+                 ) AND h.episode_season=?""", (title_external_id, season_number))
+    actual = rows[0]["c"] if rows else 0
+    return actual >= expected, expected, actual
+
+
+async def maybe_notify_season_completed(title_external_id, file_name):
+    ep = parse_episode(file_name)
+    if not ep:
+        return
+    season, episode = ep
+    expected = get_season_episode_count(title_external_id, season)
+    if not expected or episode < expected:
+        return
+    done, exp, act = check_season_completed(title_external_id, season)
+    if not done:
+        return
+    rows = db("SELECT title FROM titles WHERE external_id=?", (title_external_id,))
+    title = rows[0]["title"] if rows else title_external_id
+    await notify_season_completed(title, season)
+
+
 async def check_and_notify(force=False):
     cleanup_old_notifications(7)
     s = get_telegram_settings()
@@ -1012,7 +1065,6 @@ def schedule_telegram_job():
     scheduler.add_job(check_and_notify, CronTrigger(hour=h, minute=m), id="telegram_notify", replace_existing=True)
 
 
-# ── Background refresh ────────────────────────────────
 async def refresh_catalog():
     global refresh_progress
     rows = db("SELECT * FROM titles")
@@ -1164,7 +1216,6 @@ scheduler = AsyncIOScheduler()
 scheduler.add_job(refresh_catalog, "interval", hours=get_refresh_hours(), id="refresh", next_run_time=None)
 
 
-# ── Stage 4: auto-check ──────────────────────────────
 def effective_interval_hours(dist):
     trans = get_transmission_settings() or {}
     base = float(dist.get("check_interval_hours") or trans.get("default_check_interval") or 6)
@@ -1240,7 +1291,6 @@ def schedule_distribution_job():
                       id="distribution_check", replace_existing=True, max_instances=1, coalesce=True)
 
 
-# ── Stage 6: Transmission completion polling ──────────
 async def check_transmission_job():
     trans = get_transmission_settings() or {}
     if not trans.get("enabled"):
@@ -1277,6 +1327,55 @@ def schedule_transmission_poll_job():
                       id="transmission_poll", replace_existing=True, max_instances=1, coalesce=True)
 
 
+async def auto_clean_job():
+    trans = get_transmission_settings() or {}
+    if not trans.get("enabled") or not trans.get("auto_clean_enabled"):
+        return
+
+    days = int(trans.get("auto_clean_days") or 30)
+    on_watch = trans.get("auto_clean_on_watch")
+    now = datetime.now()
+    cutoff = now - timedelta(days=days)
+
+    try:
+        client = build_transmission_client()
+    except Exception:
+        return
+
+    if days > 0:
+        rows = db("""SELECT h.id, h.transmission_hash FROM download_history h
+                     WHERE h.completed_at IS NOT NULL AND h.completed_at < ?""",
+                  (cutoff.isoformat(),))
+        for r in rows:
+            try:
+                client.remove_torrent(r["transmission_hash"], delete_data=True)
+                db("DELETE FROM download_history WHERE id=?", (r["id"],), write=True)
+                print(f"[auto-clean] removed (age): {r['transmission_hash']}")
+            except Exception as e:
+                print(f"[auto-clean] remove error: {e}")
+
+    if on_watch:
+        rows = db("""SELECT h.id, h.transmission_hash, d.title_external_id,
+                            h.episode_season, h.episode_number
+                     FROM download_history h
+                     JOIN distributions d ON h.distribution_id = d.id
+                     WHERE h.episode_season IS NOT NULL""")
+        for r in rows:
+            if is_watched(r["title_external_id"], r["episode_season"], r["episode_number"]):
+                try:
+                    client.remove_torrent(r["transmission_hash"], delete_data=True)
+                    db("DELETE FROM download_history WHERE id=?", (r["id"],), write=True)
+                    print(f"[auto-clean] removed (watched): S{r['episode_season']}E{r['episode_number']}")
+                except Exception as e:
+                    print(f"[auto-clean] remove error: {e}")
+
+
+def schedule_auto_clean_job():
+    scheduler.add_job(auto_clean_job, "interval", hours=6,
+                      id="auto_clean", replace_existing=True,
+                      max_instances=1, coalesce=True)
+
+
 @app.on_event("startup")
 async def on_startup():
     scheduler.start()
@@ -1285,6 +1384,7 @@ async def on_startup():
     schedule_telegram_job()
     schedule_distribution_job()
     schedule_transmission_poll_job()
+    schedule_auto_clean_job()
 
 
 @app.on_event("shutdown")
@@ -1292,7 +1392,6 @@ async def on_shutdown():
     scheduler.shutdown()
 
 
-# ── iCalendar ─────────────────────────────────────────
 def escape_ics(s):
     if not s:
         return ""
@@ -1325,7 +1424,6 @@ def build_ics(cards):
     return "\r\n".join(lines)
 
 
-# ── Backup / Restore ──────────────────────────────────
 def _build_backup_zip(a, b, c, d):
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".db")
     os.close(tmp_fd)
@@ -1437,7 +1535,7 @@ async def restore_backup(file: UploadFile = File(...)):
                         d.write(s.read())
         try:
             scheduler.reschedule_job("refresh", trigger="interval", hours=get_refresh_hours())
-            schedule_telegram_job(); schedule_distribution_job(); schedule_transmission_poll_job()
+            schedule_telegram_job(); schedule_distribution_job(); schedule_transmission_poll_job(); schedule_auto_clean_job()
         except Exception as e:
             print(f"[backup] re-apply error: {e}")
     except Exception as e:
@@ -1450,7 +1548,6 @@ async def restore_backup(file: UploadFile = File(...)):
     return RedirectResponse("/settings?msg=restore-ok", status_code=303)
 
 
-# ── Image proxy ───────────────────────────────────────
 _ALLOWED_IMG_HOSTS = {"image.tmdb.org", "m.media-amazon.com", "ia.media-imdb.com", "upload.wikimedia.org"}
 
 
@@ -1482,7 +1579,6 @@ async def img_proxy(url: str):
         return Response(status_code=502)
 
 
-# ── Stage 2-3 ─────────────────────────────────────────
 async def check_distribution_now(title_external_id):
     dist = get_distribution(title_external_id)
     if not dist:
@@ -1499,20 +1595,20 @@ async def check_distribution_now(title_external_id):
     if not cookies:
         try:
             cookies = await client.login()
-        except RuTrackerCaptchaError:
+        except (RuTrackerCaptchaError, KinozalAuthError):
             db("UPDATE tracker_credentials SET last_error='captcha' WHERE tracker_name=?", (dist["tracker_name"],), write=True)
             return False, "Трекер требует капчу"
-        except (RuTrackerAuthError, RuTrackerForbiddenError) as e:
+        except (RuTrackerAuthError, RuTrackerForbiddenError, KinozalAuthError, KinozalForbiddenError) as e:
             db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name=?", (str(e), dist["tracker_name"]), write=True)
             return False, str(e)
-        except RuTrackerError as e:
+        except (RuTrackerError, KinozalError) as e:
             db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name=?", (str(e), dist["tracker_name"]), write=True)
             return False, str(e)
         db("UPDATE tracker_credentials SET encrypted_cookies=?, last_login_at=datetime('now'), last_error=NULL, error_count=0 WHERE tracker_name=?",
            (encrypt_value(json.dumps(cookies)), dist["tracker_name"]), write=True)
     try:
         files = await client.fetch_files(dist["torrent_id"], cookies)
-    except RuTrackerForbiddenError as e:
+    except (RuTrackerForbiddenError, KinozalForbiddenError) as e:
         db("UPDATE distributions SET status='error', error_message=? WHERE id=?", (str(e), dist["id"]), write=True)
         if username and password:
             try:
@@ -1524,7 +1620,7 @@ async def check_distribution_now(title_external_id):
                 return False, f"Ошибка: {e} (повторная: {re_})"
         else:
             return False, f"{e} Обновите cookies в настройках."
-    except RuTrackerError as e:
+    except (RuTrackerError, KinozalError) as e:
         db("UPDATE distributions SET status='error', error_message=? WHERE id=?", (str(e), dist["id"]), write=True)
         return False, str(e)
     if not files:
@@ -1557,10 +1653,18 @@ async def check_distribution_now(title_external_id):
                 paused = trans.get("action_on_new") == "pause"
                 result = build_transmission_client().add_torrent(td, dd, paused)
                 db("UPDATE distributions SET status='idle' WHERE id=?", (dist["id"],), write=True)
-                db("INSERT INTO download_history (distribution_id, file_name, file_size, transmission_hash, sent_at) VALUES (?,?,?,?,datetime('now'))",
-                   (dist["id"], result["name"], result["size"], result["hash"]), write=True)
+                ep = parse_episode(result["name"])
+                ep_s = ep[0] if ep else None
+                ep_n = ep[1] if ep else None
+                db("""INSERT INTO download_history
+                      (distribution_id, file_name, file_size, transmission_hash,
+                       episode_season, episode_number, sent_at)
+                      VALUES (?,?,?,?,?,?,datetime('now'))""",
+                   (dist["id"], result["name"], result["size"], result["hash"],
+                    ep_s, ep_n), write=True)
                 cr = db("SELECT title FROM titles WHERE external_id=?", (title_external_id,))
                 await notify_torrent_started(cr[0]["title"] if cr else title_external_id, result["name"], dd)
+                await maybe_notify_season_completed(title_external_id, result["name"])
             except Exception as e:
                 print(f"[dist-check] Auto-download failed: {e}")
     if not old_hash:
@@ -1602,41 +1706,33 @@ async def reset_pattern(title_external_id: str, sort: str = "date"):
 
 
 @app.post("/settings/tracker/test")
-async def test_tracker_login():
-    creds = get_tracker_credentials("rutracker")
+async def test_tracker_login(tracker_name: str = Form("rutracker")):
+    creds = get_tracker_credentials(tracker_name)
     if not creds:
         return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
-    cookies = load_tracker_cookies("rutracker")
+    cookies = load_tracker_cookies(tracker_name)
     username = creds.get("username", "")
     password = decrypt_value(creds.get("encrypted_password", "")) if creds.get("encrypted_password") else ""
     if not cookies and not (username and password):
         return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
-    client = build_tracker_client("rutracker", cookies=cookies)
+    client = build_tracker_client(tracker_name, cookies=cookies)
     if cookies:
         ok, reason = await client.validate_cookies(cookies)
         if ok:
-            db("UPDATE tracker_credentials SET last_login_at=datetime('now'), last_error=NULL, error_count=0 WHERE tracker_name='rutracker'", write=True)
+            db(f"UPDATE tracker_credentials SET last_login_at=datetime('now'), last_error=NULL, error_count=0 WHERE tracker_name=?",
+               (tracker_name,), write=True)
             return RedirectResponse("/settings?msg=tracker-test-ok", status_code=303)
         if not (username and password):
-            db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name='rutracker'", (reason,), write=True)
+            db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name=?", (reason,), write=True)
             return RedirectResponse("/settings?msg=tracker-cookies-invalid", status_code=303)
     try:
         nc = await client.login()
-        db("UPDATE tracker_credentials SET encrypted_cookies=?, last_login_at=datetime('now'), last_error=NULL, error_count=0 WHERE tracker_name='rutracker'",
-           (encrypt_value(json.dumps(nc)),), write=True)
+        db("UPDATE tracker_credentials SET encrypted_cookies=?, last_login_at=datetime('now'), last_error=NULL, error_count=0 WHERE tracker_name=?",
+           (encrypt_value(json.dumps(nc)), tracker_name), write=True)
         return RedirectResponse("/settings?msg=tracker-test-ok", status_code=303)
-    except RuTrackerCaptchaError:
-        db("UPDATE tracker_credentials SET last_error='captcha' WHERE tracker_name='rutracker'", write=True)
-        return RedirectResponse("/settings?msg=tracker-captcha", status_code=303)
-    except RuTrackerForbiddenError as e:
-        db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name='rutracker'", (str(e),), write=True)
-        return RedirectResponse("/settings?msg=tracker-forbidden", status_code=303)
-    except RuTrackerError as e:
-        db("UPDATE tracker_credentials SET last_error=?, error_count=error_count+1 WHERE tracker_name='rutracker'", (str(e),), write=True)
-        return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
     except Exception as e:
         traceback.print_exc()
-        db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name='rutracker'", (f"{type(e).__name__}: {e}",), write=True)
+        db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name=?", (str(e), tracker_name), write=True)
         return RedirectResponse("/settings?msg=tracker-test-fail", status_code=303)
 
 
@@ -1664,10 +1760,17 @@ async def download_distribution(title_external_id: str, sort: str = "date"):
         paused = trans.get("action_on_new") == "pause"
         result = build_transmission_client().add_torrent(td, dd, paused)
         db("UPDATE distributions SET status='idle', error_count=0, error_message=NULL WHERE id=?", (dist["id"],), write=True)
-        db("INSERT INTO download_history (distribution_id, file_name, file_size, transmission_hash, sent_at) VALUES (?,?,?,?,datetime('now'))",
-           (dist["id"], result["name"], result["size"], result["hash"]), write=True)
+        ep = parse_episode(result["name"])
+        ep_s = ep[0] if ep else None
+        ep_n = ep[1] if ep else None
+        db("""INSERT INTO download_history
+              (distribution_id, file_name, file_size, transmission_hash,
+               episode_season, episode_number, sent_at)
+              VALUES (?,?,?,?,?,?,datetime('now'))""",
+           (dist["id"], result["name"], result["size"], result["hash"], ep_s, ep_n), write=True)
         cr = db("SELECT title FROM titles WHERE external_id=?", (title_external_id,))
         await notify_torrent_started(cr[0]["title"] if cr else title_external_id, result["name"], dd)
+        await maybe_notify_season_completed(title_external_id, result["name"])
         set_setting("last_dist_download", f"✅ Отправлено: {result['name']} ({format_size(result['size'])})")
         return RedirectResponse(f"/?sort={sort}&msg=dist-downloaded", status_code=303)
     except Exception as e:
@@ -1691,7 +1794,6 @@ async def test_transmission():
         return RedirectResponse("/settings?msg=transmission-test-fail", status_code=303)
 
 
-# ── Stage 6: downloads journal ────────────────────────
 @app.get("/downloads", response_class=HTMLResponse)
 async def downloads_page(request: Request, msg: str | None = None):
     rows = db("""SELECT h.*, t.title as card_title, d.status as dist_status
@@ -1744,7 +1846,6 @@ async def downloads_remove(history_id: int):
     return RedirectResponse("/downloads?msg=download-removed", status_code=303)
 
 
-# ── Routes ────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request, sort: str = "date", err: str | None = None, msg: str | None = None):
     order = {"date": "release_date IS NULL, release_date", "title": "title COLLATE NOCASE",
@@ -1780,7 +1881,8 @@ async def index(request: Request, sort: str = "date", err: str | None = None, ms
         c["new_count"] = dist["new_files_count"] if dist else 0
         if dist:
             c.update(distribution_url=dist["url"], distribution_download_path=dist["download_path"],
-                     distribution_mode=dist["mode"], distribution_check_interval_hours=dist["check_interval_hours"])
+                     distribution_mode=dist["mode"], distribution_check_interval_hours=dist["check_interval_hours"],
+                     distribution_tracker=dist["tracker_name"])
             pat = get_pattern(dist["id"])
             if pat:
                 samples = json.loads(pat["samples_json"] or "[]")
@@ -1889,14 +1991,17 @@ async def refresh_card(external_id: str, sort: str = "date"):
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request, msg: str | None = None):
-    tracker = get_tracker_credentials("rutracker")
+    tracker_rt = get_tracker_credentials("rutracker")
+    tracker_kz = get_tracker_credentials("kinozal")
     return templates.TemplateResponse(request, "settings.html", {
         "tg": get_telegram_settings(), "refresh_hours": get_refresh_hours(),
         "refresh_label": refresh_period_label(get_refresh_hours()),
         "log_rows": [dict(r) for r in db("SELECT * FROM updates_log ORDER BY created_at DESC LIMIT 200")],
         "proxy_url": get_setting("proxy_url", "") or "", "theme": get_setting("theme", "dark"),
-        "trans": get_transmission_settings(), "tracker": tracker,
-        "tracker_has_cookies": bool(tracker and tracker.get("encrypted_cookies") and decrypt_value(tracker["encrypted_cookies"])),
+        "trans": get_transmission_settings(),
+        "tracker_rt": tracker_rt, "tracker_kz": tracker_kz,
+        "tracker_rt_has_cookies": bool(tracker_rt and tracker_rt.get("encrypted_cookies") and decrypt_value(tracker_rt["encrypted_cookies"])),
+        "tracker_kz_has_cookies": bool(tracker_kz and tracker_kz.get("encrypted_cookies") and decrypt_value(tracker_kz["encrypted_cookies"])),
         "message": {"refresh-saved": "Период обновления сохранён.", "telegram-saved": "Настройки Telegram сохранены.",
                     "proxy-saved": "Настройки прокси сохранены.", "proxy-ok": "Прокси работает!",
                     "theme-saved": "Тема сохранена.", "test-ok": "Тестовое сообщение отправлено!",
@@ -1953,10 +2058,12 @@ async def save_telegram(bot_token: str = Form(""), chat_id: str = Form(""), enab
                         send_time: str = Form("09:00"), notify_days: int = Form(1),
                         notify_date_changes: str = Form("off"), notify_new_cards: str = Form("off"),
                         notify_new_seasons: str = Form("off"), notify_new_episodes: str = Form("off"),
-                        notify_torrent_started: str = Form("off"), notify_torrent_completed: str = Form("off")):
+                        notify_torrent_started: str = Form("off"), notify_torrent_completed: str = Form("off"),
+                        notify_season_completed: str = Form("off")):
     save_telegram_settings(bot_token.strip(), chat_id.strip(), enabled == "on", send_time, notify_days,
                            notify_date_changes == "on", notify_new_cards == "on", notify_new_seasons == "on",
-                           notify_new_episodes == "on", notify_torrent_started == "on", notify_torrent_completed == "on")
+                           notify_new_episodes == "on", notify_torrent_started == "on",
+                           notify_torrent_completed == "on", notify_season_completed == "on")
     schedule_telegram_job()
     return RedirectResponse("/settings?msg=telegram-saved", status_code=303)
 
@@ -1984,6 +2091,8 @@ async def telegram_test(test_type: str):
         await notify_torrent_started("Тест", "Test.S01E01.mkv", "/media", force=True)
     elif test_type == "torrent-completed":
         await notify_torrent_completed("Тест", "Test.S01E01.mkv", 2 * 1024 ** 3, force=True)
+    elif test_type == "season-completed":
+        await notify_season_completed("Тестовый сериал", 1, force=True)
     elif test_type == "daily":
         await check_and_notify(force=True)
     else:
@@ -1998,7 +2107,9 @@ async def save_transmission(host: str = Form("localhost"), port: int = Form(9091
                             min_file_size_mb: int = Form(500), default_check_interval: int = Form(6),
                             default_download_behavior: str = Form("use_distribution_path"),
                             auto_download_new_files: str = Form("off"), auto_check_enabled: str = Form("off"),
-                            auto_check_tick_minutes: int = Form(10), transmission_poll_minutes: int = Form(3)):
+                            auto_check_tick_minutes: int = Form(10), transmission_poll_minutes: int = Form(3),
+                            auto_clean_enabled: str = Form("off"), auto_clean_days: int = Form(30),
+                            auto_clean_on_watch: str = Form("off")):
     if action_on_new not in ("download", "pause", "notify_only"):
         action_on_new = "download"
     if default_download_behavior not in ("use_distribution_path", "use_base_dir"):
@@ -2006,14 +2117,18 @@ async def save_transmission(host: str = Form("localhost"), port: int = Form(9091
     db("""UPDATE transmission_settings SET host=?, port=?, username=?, encrypted_password=?, enabled=?,
             base_download_dir=?, action_on_new=?, filter_recent_only=?, min_file_size_mb=?, default_check_interval=?,
             default_download_behavior=?, auto_download_new_files=?, auto_check_enabled=?, auto_check_tick_minutes=?,
-            transmission_poll_minutes=? WHERE id=1""",
+            transmission_poll_minutes=?, auto_clean_enabled=?, auto_clean_days=?, auto_clean_on_watch=?
+          WHERE id=1""",
        (host.strip(), port, username.strip(), encrypt_value(password.strip()), 1 if enabled == "on" else 0,
         base_download_dir.strip(), action_on_new, 1 if filter_recent_only == "on" else 0, max(1, min_file_size_mb),
         max(1, min(168, default_check_interval)), default_download_behavior,
         1 if auto_download_new_files == "on" else 0, 1 if auto_check_enabled == "on" else 0,
-        max(5, min(60, auto_check_tick_minutes)), max(1, min(60, transmission_poll_minutes))), write=True)
+        max(5, min(60, auto_check_tick_minutes)), max(1, min(60, transmission_poll_minutes)),
+        1 if auto_clean_enabled == "on" else 0, max(1, min(365, auto_clean_days)),
+        1 if auto_clean_on_watch == "on" else 0), write=True)
     schedule_distribution_job()
     schedule_transmission_poll_job()
+    schedule_auto_clean_job()
     return RedirectResponse("/settings?msg=transmission-saved", status_code=303)
 
 
@@ -2022,6 +2137,7 @@ async def save_tracker(tracker_name: str = Form("rutracker"), username: str = Fo
                        cookies_manual: str = Form(""), user_agent: str = Form(""), enabled: str = Form("off")):
     ev = 1 if enabled == "on" else 0
     ep = encrypt_value(password.strip()) if password else ""
+
     if cookies_manual.strip():
         try:
             cd = {}
@@ -2032,27 +2148,37 @@ async def save_tracker(tracker_name: str = Form("rutracker"), username: str = Fo
                     cd[n.strip()] = v.strip()
             if not cd:
                 return RedirectResponse("/settings?msg=tracker-cookies-invalid", status_code=303)
-            db("INSERT OR REPLACE INTO tracker_credentials (tracker_name, username, encrypted_password, encrypted_cookies, user_agent, enabled) VALUES (?,?,?,?,?,?)",
-               (tracker_name, username.strip(), ep, encrypt_value(json.dumps(cd)), user_agent.strip(), ev), write=True)
-            ok, reason = await RuTrackerClient(username=username.strip(), password=password.strip(),
-                                               proxy=get_proxy_url(), cookies=cd,
-                                               user_agent=user_agent.strip()).validate_cookies(cd)
+            db("""INSERT OR REPLACE INTO tracker_credentials
+                  (tracker_name, username, encrypted_password, encrypted_cookies, user_agent, enabled)
+                  VALUES (?,?,?,?,?,?)""",
+               (tracker_name, username.strip(), ep,
+                encrypt_value(json.dumps(cd)), user_agent.strip(), ev), write=True)
+            client = build_tracker_client(tracker_name, cookies=cd)
+            ok, reason = await client.validate_cookies(cd)
             if ok:
-                db("UPDATE tracker_credentials SET last_login_at=datetime('now'), last_error=NULL WHERE tracker_name=?", (tracker_name,), write=True)
+                db("UPDATE tracker_credentials SET last_login_at=datetime('now'), last_error=NULL WHERE tracker_name=?",
+                   (tracker_name,), write=True)
                 return RedirectResponse("/settings?msg=tracker-cookies-saved", status_code=303)
             db("UPDATE tracker_credentials SET last_error=? WHERE tracker_name=?", (reason,), write=True)
             return RedirectResponse("/settings?msg=tracker-cookies-invalid", status_code=303)
         except Exception as e:
             print(f"[tracker] Error: {e}")
             return RedirectResponse("/settings?msg=tracker-cookies-invalid", status_code=303)
+
     ex = get_tracker_credentials(tracker_name)
-    db("INSERT OR REPLACE INTO tracker_credentials (tracker_name, username, encrypted_password, encrypted_cookies, user_agent, enabled) VALUES (?,?,?,?,?,?)",
-       (tracker_name, username.strip(), ep, ex.get("encrypted_cookies", "") if ex else "", user_agent.strip(), ev), write=True)
+    db("""INSERT OR REPLACE INTO tracker_credentials
+          (tracker_name, username, encrypted_password, encrypted_cookies, user_agent, enabled)
+          VALUES (?,?,?,?,?,?)""",
+       (tracker_name, username.strip(), ep,
+        ex.get("encrypted_cookies", "") if ex else "",
+        user_agent.strip(), ev), write=True)
     return RedirectResponse("/settings?msg=tracker-saved", status_code=303)
 
 
 @app.post("/distribution/add")
-async def add_distribution(title_external_id: str = Form(...), url: str = Form(...), download_path: str = Form(""),
+async def add_distribution(title_external_id: str = Form(...),
+                           tracker_name: str = Form("rutracker"),
+                           url: str = Form(...), download_path: str = Form(""),
                            mode: str = Form("smart"), check_interval_hours: int = Form(6)):
     existing = get_distribution(title_external_id)
     torrent_id = parse_torrent_id(url)
@@ -2061,14 +2187,18 @@ async def add_distribution(title_external_id: str = Form(...), url: str = Form(.
     if mode not in ("smart", "fixed"):
         mode = "smart"
     if existing:
-        db("""UPDATE distributions SET tracker_name='rutracker', torrent_id=?, url=?, download_path=?, mode=?,
-                check_interval_hours=?, status='idle', last_checked_at=NULL, last_files_hash=NULL, last_files_json=NULL,
-                new_files_count=0, error_message=NULL, error_count=0 WHERE title_external_id=?""",
-           (torrent_id, url.strip(), download_path.strip(), mode, max(1, min(168, check_interval_hours)), title_external_id), write=True)
+        db("""UPDATE distributions SET tracker_name=?, torrent_id=?, url=?, download_path=?, mode=?,
+                check_interval_hours=?, status='idle', last_checked_at=NULL, last_files_hash=NULL,
+                last_files_json=NULL, new_files_count=0, error_message=NULL, error_count=0 WHERE title_external_id=?""",
+           (tracker_name, torrent_id, url.strip(), download_path.strip(), mode,
+            max(1, min(168, check_interval_hours)), title_external_id), write=True)
         update_next_episode_air_date(title_external_id)
         return RedirectResponse("/?msg=dist-updated", status_code=303)
-    db("INSERT INTO distributions (title_external_id, tracker_name, torrent_id, url, download_path, mode, check_interval_hours, status) VALUES (?,?,?,?,?,?,?,'idle')",
-       (title_external_id, torrent_id, url.strip(), download_path.strip(), mode, max(1, min(168, check_interval_hours))), write=True)
+    db("""INSERT INTO distributions
+          (title_external_id, tracker_name, torrent_id, url, download_path,
+           mode, check_interval_hours, status) VALUES (?,?,?,?,?,?,?,'idle')""",
+       (title_external_id, tracker_name, torrent_id, url.strip(),
+        download_path.strip(), mode, max(1, min(168, check_interval_hours))), write=True)
     update_next_episode_air_date(title_external_id)
     return RedirectResponse("/?msg=dist-added", status_code=303)
 

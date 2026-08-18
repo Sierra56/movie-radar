@@ -526,7 +526,8 @@
                 data-has="true" data-url="{{ (c.distribution_url or '')|e }}"
                 data-path="{{ (c.distribution_download_path or '')|e }}"
                 data-mode="{{ (c.distribution_mode or 'smart')|e }}"
-                data-interval="{{ c.distribution_check_interval_hours or 6 }}">
+                data-interval="{{ c.distribution_check_interval_hours or 6 }}"
+                data-tracker="{{ (c.distribution_tracker or 'rutracker')|e }}">
                 🎬 Изменить раздачу{% if c.distribution_status == 'has_new' and c.new_count %}<span
                     class="count-badge">{{ c.new_count }}</span>{% endif %}
             </button>
@@ -577,9 +578,17 @@
                 <form method="post" action="/distribution/add" id="dist-form">
                     <input type="hidden" name="title_external_id" id="dist-title-id">
                     <div class="field">
-                        <label>Ссылка на раздачу (rutracker)</label>
-                        <input type="text" name="url" id="dist-url"
-                            placeholder="https://rutracker.org/forum/viewtopic.php?t=..." required>
+                        <label>Трекер</label>
+                        <select name="tracker_name" id="dist-tracker">
+                            <option value="rutracker">rutracker.org</option>
+                            <option value="kinozal">kinozal.me</option>
+                        </select>
+                        <p class="hint">Оба трекера настраиваются в разделе «Настройки».</p>
+                    </div>
+                    <div class="field">
+                        <label>Ссылка на раздачу</label>
+                        <input type="text" name="url" id="dist-url" placeholder="https://.../viewtopic.php?t=..."
+                            required>
                         <p class="hint">При изменении статус проверки сбрасывается — нажмите ⟳ после сохранения.</p>
                     </div>
                     <div class="field">
@@ -700,12 +709,14 @@
         document.getElementById('dist-modal-title').textContent = (has ? 'Изменить раздачу: ' : 'Добавить раздачу: ') + title;
 
         if (has) {
+            document.getElementById('dist-tracker').value = btn.dataset.tracker || 'rutracker';
             document.getElementById('dist-url').value = btn.dataset.url || '';
             document.getElementById('dist-path').value = btn.dataset.path || '';
             const mi = document.querySelector(`input[name="mode"][value="${btn.dataset.mode || 'smart'}"]`);
             if (mi) mi.checked = true;
             document.getElementById('dist-interval').value = btn.dataset.interval || 6;
         } else {
+            document.getElementById('dist-tracker').value = 'rutracker';
             document.getElementById('dist-url').value = '';
             document.getElementById('dist-path').value = '';
             document.querySelector('input[name="mode"][value="smart"]').checked = true;
