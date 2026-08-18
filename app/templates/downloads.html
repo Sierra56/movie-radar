@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Загрузки{% endblock %}
+
+{% block extra_css %}
+<style>
+    .dl-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+    }
+
+    .dl-table th,
+    .dl-table td {
+        padding: 10px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        vertical-align: top;
+    }
+
+    .dl-table th {
+        color: var(--text-muted);
+        font-weight: 600;
+    }
+
+    .dl-name {
+        color: var(--text);
+        word-break: break-all;
+    }
+
+    .dl-card {
+        color: var(--accent);
+        font-size: 13px;
+        display: block;
+        margin-top: 2px;
+    }
+
+    .dl-status {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        white-space: nowrap;
+    }
+
+    .dl-status.done {
+        background: var(--success);
+        color: #fff;
+    }
+
+    .dl-status.pending {
+        background: var(--accent-bg);
+        color: var(--accent-text);
+    }
+
+    .dl-muted {
+        color: var(--text-faint);
+        font-size: 12px;
+    }
+
+    .dl-remove {
+        background: var(--delete-btn-bg);
+        color: #fff;
+        border: 0;
+        border-radius: 6px;
+        padding: 4px 8px;
+        cursor: pointer;
+    }
+
+    .dl-remove:hover {
+        background: var(--delete-btn-hover);
+    }
+
+    .empty {
+        color: var(--text-muted);
+        margin-top: 16px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1 class="page-title">📥 Загрузки</h1>
+
+{% if msg == 'download-removed' %}<p class="message">Загрузка удалена из Transmission и журнала.</p>{% endif %}
+
+{% if rows %}
+<table class="dl-table">
+    <thead>
+        <tr>
+            <th>Файл</th>
+            <th>Размер</th>
+            <th>Отправлен</th>
+            <th>Статус</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rows %}
+        <tr>
+            <td>
+                <span class="dl-name">{{ r.file_name }}</span>
+                {% if r.card_title %}<span class="dl-card">🎬 {{ r.card_title }}</span>{% endif %}
+            </td>
+            <td class="dl-muted">{{ r.file_size or 0 | filesizeformat if false else (r.file_size or '?') }}</td>
+            <td class="dl-muted">{{ r.sent_at }}</td>
+            <td>
+                {% if r.completed_at %}
+                <span class="dl-status done">✅ завершено</span>
+                <span class="dl-muted">{{ r.completed_at }}</span>
+                {% else %}
+                <span class="dl-status pending">⏳ качается</span>
+                {% endif %}
+            </td>
+            <td>
+                <form method="post" action="/downloads/remove/{{ r.id }}"
+                    onsubmit="return confirm('Удалить торрент из Transmission и журнал?')">
+                    <button class="dl-remove" type="submit" title="Удалить из Transmission">🗑</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="empty">Журнал загрузок пуст. Отправьте торрент в Transmission кнопкой ⬇ на карточке.</p>
+{% endif %}
+{% endblock %}
