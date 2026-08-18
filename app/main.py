@@ -1609,40 +1609,6 @@ async def get_sw():
     return Response(content=(STATIC_DIR / "sw.js").read_text(encoding="utf-8"),
                     media_type="application/javascript")
 
-@app.get("/similar/{external_id}", response_class=HTMLResponse)
-async def similar_page(request: Request, external_id: str, msg: str | None = None):
-    """Показывает похожие сериалы только для конкретного сериала."""
-    rows = db("SELECT * FROM titles WHERE external_id=?", (external_id,))
-    if not rows:
-        return RedirectResponse("/", status_code=303)
-    card = dict(rows[0])
-    card["poster_url"] = ensure_proxied(card.get("poster_url"))
-
-    existing_ids = {r["external_id"] for r in db("SELECT external_id FROM titles")}
-    similar_list = []
-    src = SOURCES["tmdb"]
-    tmdb_id = parse_tmdb_id(external_id)
-    if tmdb_id is not None:
-        try:
-            data = await src._get(f"/tv/{tmdb_id}/similar")
-            for r in data.get("results", [])[:20]:
-                ext_id = f"tmdb:tv:{r['id']}"
-                if ext_id in existing_ids:
-                    continue
-                poster = f"https://image.tmdb.org/t/p/w342{r['poster_path']}" if r.get("poster_path") else None
-                similar_list.append({
-                    "external_id": ext_id,
-                    "title": r.get("name") or "",
-                    "poster_url": ensure_proxied(poster),
-                })
-        except Exception:
-            pass
-
-    messages = {"added-one": "Сериал добавлен в каталог."}
-    return templates.TemplateResponse(request, "similar.html", {
-        "card": card, "similar": similar_list, "msg": messages.get(msg)})
-
-
 async def check_distribution_now(title_external_id):
     dist = get_distribution(title_external_id)
     if not dist:
@@ -2337,70 +2303,6 @@ async def toggle_notify(external_id: str, sort: str = "date"):
 async def notify_all(state: str, sort: str = "date"):
     db("UPDATE titles SET notify_enabled=?", (1 if state == "on" else 0,), write=True)
     return RedirectResponse(f"/?sort={sort}", status_code=303)
-
-
-@app.get("/recommendations", response_class=HTMLResponse)
-async def recommendations_page(request: Request, msg: str | None = None):
-    """Показывает похожие сериалы для последних просмотренных (исключая уже в каталоге)."""
-    watched_shows = db("""SELECT DISTINCT t.external_id, t.title, t.poster_url
-                          FROM watched_episodes w
-                          JOIN titles t ON w.title_external_id = t.external_id
-                          WHERE t.type = 'series'
-                          ORDER BY w.watched_at DESC LIMIT 5""")
-
-    existing_ids = {r["external_id"] for r in db("SELECT external_id FROM titles")}
-
-    similar_list = []
-    seen_ids = set()
-    src = SOURCES["tmdb"]
-
-    for w in watched_shows:
-        tmdb_id = parse_tmdb_id(w["external_id"])
-        if tmdb_id is None:
-            continue
-        try:
-            data = await src._get(f"/tv/{tmdb_id}/similar")
-            results = data.get("results", [])[:10]
-            for r in results:
-                ext_id = f"tmdb:tv:{r['id']}"
-                if ext_id in existing_ids or ext_id in seen_ids:
-                    continue
-                seen_ids.add(ext_id)
-                poster = f"https://image.tmdb.org/t/p/w342{r['poster_path']}" if r.get("poster_path") else None
-                similar_list.append({
-                    "external_id": ext_id,
-                    "title": r.get("name") or r.get("title") or "",
-                    "poster_url": ensure_proxied(poster),
-                    "source_show": w["title"],
-                })
-        except Exception as e:
-            print(f"[similar] error for {w['external_id']}: {e}")
-            continue
-        await asyncio.sleep(0.3)
-
-    messages = {
-        "added-one": "Сериал добавлен в каталог.",
-        "similar-added": "Похожие сериалы добавлены в каталог.",
-        "similar-fail": "Не удалось получить похожие сериалы.",
-    }
-    return templates.TemplateResponse(request, "recommendations.html", {
-        "similar": similar_list,
-        "watched": [dict(r) for r in watched_shows],
-        "msg": messages.get(msg)})
-
-
-@app.post("/recommendations/add/{external_id}")
-async def add_one_similar(external_id: str):
-    src = SOURCES.get("tmdb")
-    try:
-        info = await src.fetch(external_id)
-        if info:
-            db("INSERT OR IGNORE INTO titles (external_id, title, type, release_date, poster_url, genres, source, updated_at) VALUES (?,?,?,?,?,?,?,datetime('now'))",
-               (info["external_id"], info["title"], info["type"], info["release_date"],
-                await download_card_poster(info), info["genres"], "tmdb"), write=True)
-    except Exception as e:
-        print(f"[similar-add] error: {e}")
-    return RedirectResponse("/recommendations?msg=added-one", status_code=303)
 
 
 @app.get("/title/{external_id}", response_class=HTMLResponse)
