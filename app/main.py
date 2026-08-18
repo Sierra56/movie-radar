@@ -623,28 +623,17 @@ def progress_percent(w, t):
 
 
 def parse_torrent_id(url):
-    """Парсит ID торрента из URL rutracker или kinozal."""
     url = url.strip()
-    
-    # Rutracker: viewtopic.php?t=12345
-    if "viewtopic.php" in url:
-        for pair in urlparse(url).query.split("&"):
+    parsed = urlparse(url)
+    pairs = parsed.query.split("&")
+    if "viewtopic.php" in parsed.path:
+        for pair in pairs:
             if pair.startswith("t="):
                 return pair[2:]
-        m = _re.search(r"t=(\d+)", url)
-        if m:
-            return m.group(1)
-    
-    # Kinozal: details.php?id=12345
-    if "details.php" in url:
-        for pair in urlparse(url).query.split("&"):
+    if "details.php" in parsed.path:
+        for pair in pairs:
             if pair.startswith("id="):
                 return pair[3:]
-        m = _re.search(r"id=(\d+)", url)
-        if m:
-            return m.group(1)
-    
-    # Fallback: любое число в URL
     m = _re.search(r"[?&](?:t|id)=(\d+)", url)
     return m.group(1) if m else None
 
@@ -1348,17 +1337,14 @@ async def auto_clean_job():
     trans = get_transmission_settings() or {}
     if not trans.get("enabled") or not trans.get("auto_clean_enabled"):
         return
-
     days = int(trans.get("auto_clean_days") or 30)
     on_watch = trans.get("auto_clean_on_watch")
     now = datetime.now()
     cutoff = now - timedelta(days=days)
-
     try:
         client = build_transmission_client()
     except Exception:
         return
-
     if days > 0:
         rows = db("""SELECT h.id, h.transmission_hash FROM download_history h
                      WHERE h.completed_at IS NOT NULL AND h.completed_at < ?""",
@@ -1370,7 +1356,6 @@ async def auto_clean_job():
                 print(f"[auto-clean] removed (age): {r['transmission_hash']}")
             except Exception as e:
                 print(f"[auto-clean] remove error: {e}")
-
     if on_watch:
         rows = db("""SELECT h.id, h.transmission_hash, d.title_external_id,
                             h.episode_season, h.episode_number
@@ -1767,16 +1752,39 @@ async def download_distribution(title_external_id: str, sort: str = "date"):
     if not creds or not creds.get("enabled"):
         set_setting("last_dist_download", "Трекер отключён в настройках")
         return RedirectResponse(f"/?sort={sort}&msg=dist-download-fail", status_code=303)
+
     cookies = load_tracker_cookies(dist["tracker_name"])
-    if not cookies:
-        set_setting("last_dist_download", "Не найдены cookies трекера")
+    username = creds.get("username", "")
+    password = decrypt_value(creds.get("encrypted_password", "")) if creds.get("encrypted_password") else ""
+
+    if not cookies and not (username and password):
+        set_setting("last_dist_download", "Не настроены учётные данные трекера")
         return RedirectResponse(f"/?sort={sort}&msg=dist-download-fail", status_code=303)
+
     try:
-        td = await build_tracker_client(dist["tracker_name"], cookies=cookies).download_torrent(dist["torrent_id"], cookies)
+        tracker_client = build_tracker_client(dist["tracker_name"], cookies=cookies)
+
+        if not cookies:
+            try:
+                cookies = await tracker_client.login()
+                db("""UPDATE tracker_credentials SET encrypted_cookies=?, last_login_at=datetime('now'),
+                      last_error=NULL, error_count=0 WHERE tracker_name=?""",
+                   (encrypt_value(json.dumps(cookies)), dist["tracker_name"]), write=True)
+                print(f"[download] Logged in and saved cookies for {dist['tracker_name']}")
+            except (RuTrackerCaptchaError, KinozalAuthError):
+                set_setting("last_dist_download", "Трекер требует капчу — войдите через браузер")
+                return RedirectResponse(f"/?sort={sort}&msg=dist-download-fail", status_code=303)
+            except (RuTrackerAuthError, RuTrackerForbiddenError,
+                    KinozalAuthError, KinozalForbiddenError) as e:
+                set_setting("last_dist_download", f"Ошибка входа: {e}")
+                return RedirectResponse(f"/?sort={sort}&msg=dist-download-fail", status_code=303)
+
+        td = await tracker_client.download_torrent(dist["torrent_id"], cookies)
         dd = _resolve_download_dir(dist, trans)
         paused = trans.get("action_on_new") == "pause"
         result = build_transmission_client().add_torrent(td, dd, paused)
-        db("UPDATE distributions SET status='idle', error_count=0, error_message=NULL WHERE id=?", (dist["id"],), write=True)
+        db("UPDATE distributions SET status='idle', error_count=0, error_message=NULL WHERE id=?",
+           (dist["id"],), write=True)
         ep = parse_episode(result["name"])
         ep_s = ep[0] if ep else None
         ep_n = ep[1] if ep else None
@@ -1788,11 +1796,13 @@ async def download_distribution(title_external_id: str, sort: str = "date"):
         cr = db("SELECT title FROM titles WHERE external_id=?", (title_external_id,))
         await notify_torrent_started(cr[0]["title"] if cr else title_external_id, result["name"], dd)
         await maybe_notify_season_completed(title_external_id, result["name"])
-        set_setting("last_dist_download", f"✅ Отправлено: {result['name']} ({format_size(result['size'])})")
+        set_setting("last_dist_download",
+                    f"✅ Отправлено: {result['name']} ({format_size(result['size'])})")
         return RedirectResponse(f"/?sort={sort}&msg=dist-downloaded", status_code=303)
     except Exception as e:
         traceback.print_exc()
-        db("UPDATE distributions SET status='error', error_message=?, error_count=error_count+1 WHERE id=?", (str(e), dist["id"]), write=True)
+        db("UPDATE distributions SET status='error', error_message=?, error_count=error_count+1 WHERE id=?",
+           (str(e), dist["id"]), write=True)
         set_setting("last_dist_download", f"❌ Ошибка: {e}")
         return RedirectResponse(f"/?sort={sort}&msg=dist-download-fail", status_code=303)
 
@@ -2183,12 +2193,26 @@ async def save_tracker(tracker_name: str = Form("rutracker"), username: str = Fo
             return RedirectResponse("/settings?msg=tracker-cookies-invalid", status_code=303)
 
     ex = get_tracker_credentials(tracker_name)
+    existing_cookies = ex.get("encrypted_cookies", "") if ex else ""
     db("""INSERT OR REPLACE INTO tracker_credentials
           (tracker_name, username, encrypted_password, encrypted_cookies, user_agent, enabled)
           VALUES (?,?,?,?,?,?)""",
-       (tracker_name, username.strip(), ep,
-        ex.get("encrypted_cookies", "") if ex else "",
-        user_agent.strip(), ev), write=True)
+       (tracker_name, username.strip(), ep, existing_cookies, user_agent.strip(), ev), write=True)
+
+    if password.strip() and username.strip() and not existing_cookies:
+        try:
+            client = build_tracker_client(tracker_name)
+            new_cookies = await client.login()
+            db("""UPDATE tracker_credentials SET encrypted_cookies=?, last_login_at=datetime('now'),
+                  last_error=NULL, error_count=0 WHERE tracker_name=?""",
+               (encrypt_value(json.dumps(new_cookies)), tracker_name), write=True)
+            print(f"[tracker] Auto-login succeeded for {tracker_name}, cookies saved")
+            return RedirectResponse("/settings?msg=tracker-saved", status_code=303)
+        except (RuTrackerCaptchaError, KinozalAuthError):
+            print(f"[tracker] Auto-login failed for {tracker_name}: captcha")
+        except Exception as e:
+            print(f"[tracker] Auto-login failed for {tracker_name}: {e}")
+
     return RedirectResponse("/settings?msg=tracker-saved", status_code=303)
 
 

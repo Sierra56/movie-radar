@@ -3,217 +3,255 @@
 
 {% block extra_css %}
 <style>
-    .header {
+    .title-header {
         display: flex;
-        gap: 24px;
+        gap: 20px;
         margin-bottom: 24px;
-        flex-wrap: wrap;
     }
 
-    .header img {
+    .title-poster {
         width: 200px;
-        border-radius: 12px;
+        border-radius: 8px;
+        overflow: hidden;
+        flex-shrink: 0;
     }
 
-    .no-poster {
-        width: 200px;
-        aspect-ratio: 2/3;
-        background: var(--no-poster-bg);
-        border-radius: 12px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: var(--no-poster-text);
+    .title-poster img {
+        width: 100%;
+        display: block;
     }
 
-    .header h1 {
-        font-size: 28px;
+    .title-info h1 {
+        margin: 0 0 12px;
+    }
+
+    .title-meta {
+        color: var(--text-muted);
+        font-size: 14px;
         margin-bottom: 8px;
     }
 
-    .header .meta {
-        color: var(--text-muted);
-        font-size: 15px;
-    }
-
-    .header .genre {
+    .title-genres {
         color: var(--text-faint);
-        font-size: 14px;
-        margin-top: 6px;
-    }
-
-    .actions {
-        display: flex;
-        gap: 8px;
-        margin-top: 16px;
-        flex-wrap: wrap;
-    }
-
-    .actions button,
-    .actions a {
-        padding: 10px 18px;
-        border: 0;
-        border-radius: 8px;
-        background: var(--bg-hover);
-        color: var(--text);
-        cursor: pointer;
-        text-decoration: none;
-        font-size: 14px;
-    }
-
-    .actions button:hover,
-    .actions a:hover {
-        background: var(--border-light);
-    }
-
-    .show-progress {
-        background: var(--bg-card);
-        padding: 12px 16px;
-        border-radius: 8px;
-        margin-bottom: 20px;
-        font-size: 14px;
-        color: var(--text-muted);
-    }
-
-    h2 {
-        font-size: 20px;
+        font-size: 13px;
         margin-bottom: 16px;
     }
 
-    .seasons-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-        gap: 16px;
+    .title-progress {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 999px;
+        background: var(--accent-bg);
+        color: var(--accent-text);
+        font-size: 13px;
     }
 
-    .season-card-link {
-        text-decoration: none;
-        color: var(--text);
-    }
-
-    .season-card-link:hover .season-card {
-        outline: 2px solid var(--accent);
+    .seasons-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
     }
 
     .season-card {
         background: var(--bg-card);
-        border-radius: 12px;
-        overflow: hidden;
-    }
-
-    .season-card img,
-    .season-card .no-poster {
-        width: 100%;
-        aspect-ratio: 2/3;
-        object-fit: cover;
-    }
-
-    .season-card .no-poster {
+        border-radius: 8px;
+        padding: 16px;
         display: flex;
         align-items: center;
-        justify-content: center;
-        background: var(--no-poster-bg);
-        color: var(--no-poster-text);
+        gap: 16px;
     }
 
-    .season-card .info {
-        padding: 10px 12px 12px;
+    .season-poster {
+        width: 60px;
+        border-radius: 4px;
+        overflow: hidden;
+        flex-shrink: 0;
     }
 
-    .season-card h3 {
-        font-size: 15px;
+    .season-poster img {
+        width: 100%;
+        display: block;
+    }
+
+    .season-info {
+        flex: 1;
+    }
+
+    .season-name {
+        font-size: 16px;
         margin-bottom: 4px;
     }
 
-    .season-card .meta {
+    .season-date {
         color: var(--text-muted);
         font-size: 13px;
+        margin-bottom: 6px;
     }
 
-    .watch-progress {
-        margin-top: 4px;
+    .season-progress {
+        display: flex;
+        gap: 12px;
+        align-items: center;
     }
 
-    .watch-progress.done {
-        color: var(--success);
+    .season-progress-bar {
+        flex: 1;
+        height: 6px;
+        background: var(--bg-hover);
+        border-radius: 3px;
+        overflow: hidden;
     }
 
-    .empty {
+    .season-progress-fill {
+        height: 100%;
+        background: var(--accent);
+        transition: width .3s;
+    }
+
+    .season-progress-text {
         color: var(--text-muted);
-        margin-top: 20px;
+        font-size: 13px;
+        white-space: nowrap;
+    }
+
+    .season-actions {
+        display: flex;
+        gap: 8px;
+    }
+
+    .season-btn {
+        padding: 8px 14px;
+        border-radius: 6px;
+        border: 1px solid var(--border-light);
+        background: var(--bg-hover);
+        color: var(--text);
+        font-size: 13px;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .season-btn:hover {
+        background: var(--border-light);
+    }
+
+    .season-btn.watched {
+        background: var(--success);
+        color: #fff;
+        border-color: var(--success);
+    }
+
+    .season-btn.partial {
+        background: var(--warning-bg);
+        color: var(--warning-text);
+        border-color: var(--warning-text);
+    }
+
+    .no-poster {
+        width: 100%;
+        aspect-ratio: 2/3;
+        background: var(--no-poster-bg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--no-poster-text);
+        font-size: 12px;
+    }
+
+    @media (max-width:600px) {
+        .title-header {
+            flex-direction: column;
+        }
+
+        .title-poster {
+            width: 150px;
+        }
+
+        .season-card {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .season-poster {
+            width: 100%;
+            aspect-ratio: 2/3;
+        }
     }
 </style>
 {% endblock %}
 
 {% block content %}
-<a href="/" style="display:inline-block; margin-bottom:16px; color:var(--accent); text-decoration:none;">← Назад к
-    списку</a>
-
-<div class="header">
-    {% if card.poster_url %}
-    <img src="{{ card.poster_url }}" alt="{{ card.title }}">
-    {% else %}
-    <div class="no-poster">нет постера</div>
-    {% endif %}
-    <div>
+<div class="title-header">
+    <div class="title-poster">
+        {% if card.poster_url %}
+        <img src="{{ card.poster_url }}" alt="{{ card.title }}">
+        {% else %}
+        <div class="no-poster">нет постера</div>
+        {% endif %}
+    </div>
+    <div class="title-info">
         <h1>{{ card.title }}</h1>
-        <p class="meta">
-            {% if card.date_human %}{{ card.date_human }}{% else %}дата неизвестна{% endif %}
-            {% if card.type %} · {{ card.type }}{% endif %}
-            {% if card.source %} · {{ card.source }}{% endif %}
+        <p class="title-meta">
+            {% if card.date_human %}📅 {{ card.date_human }}{% endif %}
+            {% if card.type %} · {{ 'Фильм' if card.type == 'movie' else 'Сериал' }}{% endif %}
         </p>
-        {% if card.genres %}<p class="genre">{{ card.genres }}</p>{% endif %}
-        <div class="actions">
-            {% if card.type == 'series' and card.source == 'tmdb' %}
-            <form method="post" action="/title/{{ card.external_id }}/refresh-seasons">
-                <button type="submit">🔄 Обновить сезоны</button>
-            </form>
-            {% endif %}
-            {% if card.source != 'local' %}
-            <form method="post" action="/refresh/{{ card.external_id }}">
-                <button type="submit">🔄 Обновить карточку</button>
-            </form>
-            {% endif %}
-        </div>
+        {% if card.genres %}<p class="title-genres">{{ card.genres }}</p>{% endif %}
+        {% if show_total > 0 %}
+        <span class="title-progress">
+            Просмотрено: {{ show_watched }}/{{ show_total }} ({{ show_percent }}%)
+        </span>
+        {% endif %}
     </div>
 </div>
 
-{% if card.type == 'series' and show_total > 0 %}
-<div class="show-progress">
-    📊 Общий прогресс: {{ show_watched }} / {{ show_total }} эпизодов ({{ show_percent }}%)
-</div>
-{% endif %}
-
-{% if card.type == 'series' %}
-<h2>Сезоны</h2>
 {% if seasons %}
-<div class="seasons-grid">
+<h2 class="page-title" style="font-size:20px; margin:24px 0 16px;">Сезоны</h2>
+<div class="seasons-list">
     {% for s in seasons %}
-    <a class="season-card-link" href="/title/{{ card.external_id }}/season/{{ s.season_number }}">
-        <div class="season-card">
+    <div class="season-card">
+        <div class="season-poster">
             {% if s.poster_url %}
-            <img src="{{ s.poster_url }}" alt="{{ s.name }}" loading="lazy">
+            <img src="{{ s.poster_url }}" alt="Сезон {{ s.season_number }}">
             {% else %}
-            <div class="no-poster">нет постера</div>
+            <div class="no-poster" style="aspect-ratio:2/3;">нет постера</div>
             {% endif %}
-            <div class="info">
-                <h3>{{ s.name or ('Сезон ' ~ s.season_number) }}</h3>
-                <p class="meta">
-                    {% if s.date_human %}{{ s.date_human }}{% else %}дата неизвестна{% endif %}
-                    {% if s.episodes %} · {{ s.episodes }} эп.{% endif %}
-                </p>
-                {% if s.total_count > 0 %}
-                <p class="meta watch-progress {{ 'done' if s.percent == 100 else '' }}">
-                    {% if s.percent == 100 %}✅ {% endif %}{{ s.watched_count }}/{{ s.total_count }} ({{ s.percent }}%)
-                </p>
-                {% endif %}
-            </div>
         </div>
-    </a>
+        <div class="season-info">
+            <div class="season-name">Сезон {{ s.season_number }}{% if s.name %}: {{ s.name }}{% endif %}</div>
+            {% if s.date_human %}<div class="season-date">{{ s.date_human }}</div>{% endif %}
+            {% if s.total_count > 0 %}
+            <div class="season-progress">
+                <div class="season-progress-bar">
+                    <div class="season-progress-fill" style="width:{{ s.percent }}%"></div>
+                </div>
+                <span class="season-progress-text">{{ s.watched_count }}/{{ s.total_count }}</span>
+            </div>
+            {% endif %}
+        </div>
+        <div class="season-actions">
+            {% if s.total_count > 0 %}
+            {% if s.percent == 100 %}
+            <form method="post" action="/watch-season/{{ card.external_id }}/{{ s.season_number }}">
+                <button type="submit" class="season-btn watched">✓ Просмотрено</button>
+            </form>
+            {% elif s.watched_count > 0 %}
+            <form method="post" action="/watch-season/{{ card.external_id }}/{{ s.season_number }}">
+                <button type="submit" class="season-btn partial">👁 Отметить сезон</button>
+            </form>
+            {% else %}
+            <form method="post" action="/watch-season/{{ card.external_id }}/{{ s.season_number }}">
+                <button type="submit" class="season-btn">👁 Отметить сезон</button>
+            </form>
+            {% endif %}
+            {% endif %}
+            <a href="/title/{{ card.external_id }}/season/{{ s.season_number }}" class="season-btn">📋 Эпизоды</a>
+        </div>
+    </div>
     {% endfor %}
 </div>
 {% else %}
-<p class="empty">Сезоны не загружены. Нажмите «Обновить сезоны».</p>
-{% endif %}
+<p class="empty">Сезоны не найдены.</p>
 {% endif %}
 {% endblock %}
