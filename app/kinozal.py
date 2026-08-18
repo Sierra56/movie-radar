@@ -1,5 +1,6 @@
 """Kinozal.me tracker client."""
 import re
+import html as _html
 import httpx
 
 
@@ -46,6 +47,11 @@ class KinozalClient:
             h.update(extra)
         return h
 
+    @staticmethod
+    def _is_torrent(data: bytes) -> bool:
+        return bool(data) and data[:1] == b"d" and \
+            (b"announce" in data[:1000] or b"info" in data[:1000])
+
     async def validate_cookies(self, cookies: dict) -> tuple[bool, str]:
         try:
             kw = self._client_kwargs()
@@ -90,12 +96,10 @@ class KinozalClient:
             files = []
             size_map = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3,
                         "КБ": 1024, "МБ": 1024**2, "ГБ": 1024**3}
-
             filelist_match = re.search(
                 r'<(?:div|td)[^>]*class=["\'][^"\']*filelist[^"\']*["\'][^>]*>(.*?)</(?:div|td)>',
                 html, re.DOTALL | re.IGNORECASE)
             table_html = filelist_match.group(1) if filelist_match else html
-
             rows = re.findall(r'<tr[^>]*>(.*?)</tr>', table_html, re.DOTALL | re.IGNORECASE)
             for row in rows:
                 cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL | re.IGNORECASE)
@@ -109,44 +113,58 @@ class KinozalClient:
                 m = re.search(r'([\d.,]+)\s*([A-Za-zА-Яа-я]{1,3})', size_raw)
                 if m:
                     try:
-                        num = float(m.group(1).replace(",", "."))
-                        size_bytes = int(num * size_map.get(m.group(2).upper(), 1))
+                        size_bytes = int(float(m.group(1).replace(",", ".")) *
+                                         size_map.get(m.group(2).upper(), 1))
                     except ValueError:
                         size_bytes = 0
                 files.append({"name": name, "size": size_bytes})
-
             if not files:
-                title_match = re.search(r'<title>([^<]+)</title>', html)
-                if title_match:
-                    files.append({"name": title_match.group(1).replace(" :: Кинозал", "").strip(), "size": 0})
+                t = re.search(r'<title>([^<]+)</title>', html)
+                if t:
+                    files.append({"name": t.group(1).replace(" :: Кинозал", "").strip(), "size": 0})
             return files
 
-    async def download_torrent(self, torrent_id: str, cookies: dict) -> bytes:
-        """Скачивает .torrent файл. Валидирует, что это bencoded-данные."""
+    async def download_torrent(self, torrent_id: str, cookies: dict):
+        """Возвращает .torrent (bytes) или magnet-ссылку (str) как fallback."""
         url = f"{self.BASE_URL}/download.php?id={torrent_id}"
         kw = self._client_kwargs()
         async with httpx.AsyncClient(**kw) as client:
-            r = await client.get(
-                url, cookies=cookies,
-                headers=self._headers({
-                    "Referer": f"{self.BASE_URL}/details.php?id={torrent_id}",
-                }))
-            if r.status_code != 200:
-                raise KinozalError(f"download HTTP {r.status_code}")
-            data = r.content
-            if not data:
-                raise KinozalError("пустой ответ .torrent")
+            # 1) пробуем без следования редиректам, чтобы увидеть Location
+            r = await client.get(url, cookies=cookies, follow_redirects=False,
+                                 headers=self._headers({
+                                     "Referer": f"{self.BASE_URL}/details.php?id={torrent_id}"}))
+            if r.status_code in (301, 302):
+                loc = r.headers.get("location", "")
+                print(f"[kinozal] download.php -> {r.status_code} Location: {loc}")
+                if loc:
+                    r2 = await client.get(loc, cookies=cookies, headers=self._headers())
+                    if self._is_torrent(r2.content):
+                        return r2.content
+                    r = r2
+            elif r.status_code == 200 and self._is_torrent(r.content):
+                return r.content
 
-            # Валидный .torrent — bencoded-словарь: начинается с 'd' и содержит announce/info
-            is_torrent = (data[:1] == b"d" and
-                          (b"announce" in data[:1000] or b"info" in data[:1000]))
-            if not is_torrent:
-                try:
-                    with open("/data/debug_kinozal_torrent.html", "wb") as f:
-                        f.write(data)
-                except Exception:
-                    pass
-                raise KinozalError(
-                    "kinozal вернул не .torrent файл (сохранено в "
-                    "/data/debug_kinozal_torrent.html). Проверьте дамп.")
-            return data
+            # 2) прямой запрос со следованием редиректов
+            r3 = await client.get(url, cookies=cookies, headers=self._headers({
+                "Referer": f"{self.BASE_URL}/details.php?id={torrent_id}"}))
+            if self._is_torrent(r3.content):
+                return r3.content
+
+            # 3) fallback: ищем magnet на странице раздачи
+            page = await client.get(f"{self.BASE_URL}/details.php?id={torrent_id}",
+                                    cookies=cookies, headers=self._headers())
+            text = _html.unescape(page.text)
+            m = re.search(r'(magnet:\?[^"\'\s<]+)', text)
+            if m:
+                magnet = m.group(1)
+                print(f"[kinozal] using magnet fallback: {magnet[:60]}...")
+                return magnet
+
+            try:
+                with open("/data/debug_kinozal_torrent.html", "wb") as f:
+                    f.write(page.content)
+            except Exception:
+                pass
+            raise KinozalError(
+                "kinozal не отдал .torrent и magnet не найден "
+                "(дамп: /data/debug_kinozal_torrent.html)")
