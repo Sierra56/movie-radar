@@ -3,6 +3,27 @@
 
 {% block extra_css %}
 <style>
+    .dl-actions {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 14px;
+        flex-wrap: wrap;
+    }
+
+    .dl-actions button {
+        padding: 8px 14px;
+        border-radius: 8px;
+        border: 1px solid var(--border-light);
+        background: var(--bg-hover);
+        color: var(--text);
+        font-size: 13px;
+        cursor: pointer;
+    }
+
+    .dl-actions button:hover {
+        background: var(--border-light);
+    }
+
     .dl-table {
         width: 100%;
         border-collapse: collapse;
@@ -80,7 +101,17 @@
 {% block content %}
 <h1 class="page-title">📥 Загрузки</h1>
 
-{% if msg == 'download-removed' %}<p class="message">Загрузка удалена из Transmission и журнала.</p>{% endif %}
+{% if message %}<p class="message">{{ message }}</p>{% endif %}
+
+<div class="dl-actions">
+    <form method="post" action="/downloads/refresh">
+        <button type="submit">🔄 Обновить все</button>
+    </form>
+    <form method="post" action="/downloads/remove-all"
+        onsubmit="return confirm('Удалить ВСЕ торренты из Transmission и очистить журнал?\n\nСкачанные файлы останутся на диске.')">
+        <button type="submit">🗑 Удалить все</button>
+    </form>
+</div>
 
 {% if rows %}
 <table class="dl-table">
@@ -100,7 +131,7 @@
                 <span class="dl-name">{{ r.file_name }}</span>
                 {% if r.card_title %}<span class="dl-card">🎬 {{ r.card_title }}</span>{% endif %}
             </td>
-            <td class="dl-muted">{{ r.file_size or 0 | filesizeformat if false else (r.file_size or '?') }}</td>
+            <td class="dl-muted">{{ format_size(r.file_size) }}</td>
             <td class="dl-muted">{{ r.sent_at }}</td>
             <td>
                 {% if r.completed_at %}

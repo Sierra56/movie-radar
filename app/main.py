@@ -628,6 +628,7 @@ def format_size(size_bytes):
         return "?"
     mb = size_bytes / (1024 * 1024)
     return f"{mb / 1024:.2f} ГБ" if mb > 1024 else f"{mb:.1f} МБ"
+templates.env.globals["format_size"] = format_size
 
 
 # ── Stage 5: episode parsing & learning ──────────────
@@ -1692,13 +1693,43 @@ async def test_transmission():
 
 # ── Stage 6: downloads journal ────────────────────────
 @app.get("/downloads", response_class=HTMLResponse)
-async def downloads_page(request: Request):
+async def downloads_page(request: Request, msg: str | None = None):
     rows = db("""SELECT h.*, t.title as card_title, d.status as dist_status
                  FROM download_history h
                  LEFT JOIN distributions d ON h.distribution_id = d.id
                  LEFT JOIN titles t ON d.title_external_id = t.external_id
                  ORDER BY h.sent_at DESC LIMIT 200""")
-    return templates.TemplateResponse(request, "downloads.html", {"rows": [dict(r) for r in rows]})
+    messages = {
+        "downloads-refreshed": "Статусы загрузок обновлены.",
+        "downloads-removed-all": "Все торренты удалены из Transmission, журнал очищен.",
+        "download-removed": "Загрузка удалена.",
+    }
+    return templates.TemplateResponse(request, "downloads.html",
+                                      {"rows": [dict(r) for r in rows], "message": messages.get(msg)})
+
+
+@app.post("/downloads/refresh")
+async def downloads_refresh():
+    await check_transmission_job()
+    return RedirectResponse("/downloads?msg=downloads-refreshed", status_code=303)
+
+
+@app.post("/downloads/remove-all")
+async def downloads_remove_all():
+    rows = db("SELECT * FROM download_history")
+    try:
+        client = build_transmission_client()
+    except Exception as e:
+        print(f"[downloads] cannot connect to Transmission: {e}")
+        client = None
+    for r in rows:
+        if client:
+            try:
+                client.remove_torrent(r["transmission_hash"], delete_data=False)
+            except Exception as e:
+                print(f"[downloads] remove failed: {e}")
+    db("DELETE FROM download_history", write=True)
+    return RedirectResponse("/downloads?msg=downloads-removed-all", status_code=303)
 
 
 @app.post("/downloads/remove/{history_id}")
