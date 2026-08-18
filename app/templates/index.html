@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Скоро на экранах{% endblock %}
+{% block title %}Movie radar{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -93,14 +93,18 @@
         z-index: 2;
     }
 
+    /* Инфо-блок растягивается и прижимает кнопки к низу */
     .info {
-        padding: 12px 12px 4px;
+        padding: 12px 12px 8px;
         flex: 1 1 auto;
+        display: flex;
+        flex-direction: column;
     }
 
     .card h2 {
         font-size: 15px;
         margin-bottom: 6px;
+        min-height: 2.6em;
     }
 
     .meta {
@@ -196,13 +200,15 @@
         border: 1px dashed var(--accent);
     }
 
+    /* Блок кнопок: всегда у низа карточки, отделён линией */
     .card-buttons {
-        padding: 8px 12px 12px;
+        padding: 10px 12px 12px;
         margin-top: auto;
         display: flex;
         flex-direction: column;
         gap: 6px;
         flex: 0 0 auto;
+        border-top: 1px solid var(--border);
     }
 
     .btn-full {
@@ -465,20 +471,6 @@
     .learn-samples div {
         padding: 3px 0;
     }
-
-    .learn-actions {
-        display: flex;
-        gap: 8px;
-        margin-top: 12px;
-    }
-
-    .learn-actions form {
-        flex: 1;
-    }
-
-    .learn-actions button {
-        width: 100%;
-    }
 </style>
 {% endblock %}
 
@@ -687,7 +679,6 @@
     pollProgress();
 
     const distModal = document.getElementById('dist-modal');
-    let currentDistId = null;
 
     function switchTab(name) {
         document.querySelectorAll('.mtab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
@@ -717,7 +708,6 @@
         const id = btn.dataset.id;
         const title = btn.dataset.title || '';
         const has = btn.dataset.has === 'true';
-        currentDistId = id;
 
         document.getElementById('dist-title-id').value = id;
         document.getElementById('dist-modal-title').textContent = (has ? 'Изменить раздачу: ' : 'Добавить раздачу: ') + title;

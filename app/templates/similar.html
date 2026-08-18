@@ -1,30 +1,46 @@
 {% extends "base.html" %}
-{% block title %}Предложения{% endblock %}
+{% block title %}Похожие на {{ card.title }}{% endblock %}
 
 {% block extra_css %}
 <style>
-    .rec-intro {
-        margin-bottom: 20px;
-    }
-
-    .rec-sources {
+    .sim-header {
         display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        margin-top: 10px;
+        gap: 16px;
+        margin-bottom: 20px;
+        align-items: center;
     }
 
-    .rec-source {
-        padding: 6px 12px;
-        border-radius: 999px;
-        background: var(--bg-card);
-        border: 1px solid var(--border-light);
-        font-size: 13px;
+    .sim-poster {
+        width: 80px;
+        border-radius: 8px;
+        overflow: hidden;
+        flex-shrink: 0;
+    }
+
+    .sim-poster img {
+        width: 100%;
+        display: block;
+    }
+
+    .sim-info h2 {
+        margin: 0 0 4px;
+    }
+
+    .sim-info p {
         color: var(--text-muted);
+        font-size: 13px;
+        margin: 0;
     }
 
-    .rec-source b {
-        color: var(--text);
+    .no-poster {
+        width: 100%;
+        aspect-ratio: 2/3;
+        background: var(--no-poster-bg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--no-poster-text);
+        font-size: 11px;
     }
 
     .rec-list {
@@ -48,17 +64,6 @@
         display: block;
     }
 
-    .no-poster {
-        width: 100%;
-        aspect-ratio: 2/3;
-        background: var(--no-poster-bg);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: var(--no-poster-text);
-        font-size: 12px;
-    }
-
     .rec-info {
         padding: 10px 12px;
         flex: 1;
@@ -68,14 +73,8 @@
 
     .rec-title {
         font-size: 14px;
-        margin-bottom: 4px;
-        font-weight: 600;
-    }
-
-    .rec-from {
-        font-size: 12px;
-        color: var(--text-faint);
         margin-bottom: 10px;
+        font-weight: 600;
     }
 
     .rec-btn {
@@ -98,18 +97,18 @@
 {% endblock %}
 
 {% block content %}
-<h1 class="page-title">💡 Предложения</h1>
+<h1 class="page-title">💡 Похожие сериалы</h1>
 
 {% if msg == 'added-one' %}<p class="message">Сериал добавлен в каталог.</p>{% endif %}
-{% if msg == 'similar-fail' %}<p class="error">Не удалось получить похожие сериалы.</p>{% endif %}
 
-{% if watched %}
-<div class="rec-intro">
-    <p class="hint">На основе последних просмотренных сериалов — рекомендации с TMDB (исключая уже добавленные).</p>
-    <div class="rec-sources">
-        {% for w in watched %}
-        <span class="rec-source">📺 <b>{{ w.title }}</b></span>
-        {% endfor %}
+<div class="sim-header">
+    <div class="sim-poster">
+        {% if card.poster_url %}<img src="{{ card.poster_url }}" alt="{{ card.title }}">
+        {% else %}<div class="no-poster">нет постера</div>{% endif %}
+    </div>
+    <div class="sim-info">
+        <h2>{{ card.title }}</h2>
+        <p>Похожие сериалы по данным TMDB (исключая уже добавленные в каталог)</p>
     </div>
 </div>
 
@@ -121,7 +120,6 @@
         {% else %}<div class="no-poster">нет постера</div>{% endif %}
         <div class="rec-info">
             <div class="rec-title">{{ s.title }}</div>
-            <div class="rec-from">Похож на: {{ s.source_show }}</div>
             <form method="post" action="/recommendations/add/{{ s.external_id }}">
                 <button type="submit" class="rec-btn">➕ В каталог</button>
             </form>
@@ -130,10 +128,6 @@
     {% endfor %}
 </div>
 {% else %}
-<p class="empty">Новых похожих сериалов не найдено. Возможно, всё интересное уже добавлено — отметьте ещё сериалы как
-    просмотренные.</p>
-{% endif %}
-{% else %}
-<p class="empty">Отметьте сериалы как просмотренные, чтобы получить рекомендации.</p>
+<p class="empty">Похожих сериалов не найдено — возможно, всё уже добавлено.</p>
 {% endif %}
 {% endblock %}

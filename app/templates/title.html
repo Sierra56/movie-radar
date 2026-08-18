@@ -209,6 +209,12 @@
 </div>
 
 {% if seasons %}
+<div style="margin-bottom:16px;">
+    <a href="/similar/{{ card.external_id }}" style="display:inline-block; padding:8px 16px; border-radius:8px;
+            background:var(--accent-bg); color:var(--accent-text);
+            text-decoration:none; font-size:14px;">💡 Показать похожие сериалы</a>
+</div>
+
 <h2 class="page-title" style="font-size:20px; margin:24px 0 16px;">Сезоны</h2>
 <div class="seasons-list">
     {% for s in seasons %}
@@ -237,7 +243,7 @@
             <form method="post" action="/watch-season/{{ card.external_id }}/{{ s.season_number }}" style="flex:1;">
                 <button type="submit"
                     class="season-btn {% if s.percent == 100 %}watched{% elif s.watched_count > 0 %}partial{% endif %}">
-                    {% if s.percent == 100 %}✓ Просмотрено{% else %}👁 Отметить{% endif %}
+                    {% if s.percent == 100 %}✓ Просмотрено{% else %}Просмотрено{% endif %}
                 </button>
             </form>
             {% endif %}
