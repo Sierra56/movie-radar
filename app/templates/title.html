@@ -9,7 +9,6 @@
         margin-bottom: 24px;
     }
 
-    /* Кликабельный основной постер с бейджем «Назад» */
     .title-poster {
         position: relative;
         width: 200px;
@@ -80,24 +79,50 @@
         flex-direction: column;
     }
 
-    /* Кликабельный постер сезона */
-    .season-poster-link {
-        display: block;
+    /* ── Флип-постер сезона ── */
+    .flip {
+        perspective: 1000px;
         width: 100%;
         aspect-ratio: 2/3;
-        overflow: hidden;
+        cursor: pointer;
     }
 
-    .season-poster-link img {
+    .flip-inner {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        transition: transform .5s;
+        transform-style: preserve-3d;
+    }
+
+    .flip.flipped .flip-inner {
+        transform: rotateY(180deg);
+    }
+
+    .flip-front,
+    .flip-back {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        backface-visibility: hidden;
+        -webkit-backface-visibility: hidden;
+    }
+
+    .flip-front img {
         width: 100%;
         height: 100%;
         object-fit: cover;
         display: block;
-        transition: transform .2s;
     }
 
-    .season-poster-link:hover img {
-        transform: scale(1.03);
+    .flip-back {
+        transform: rotateY(180deg);
+        background: var(--bg-hover);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 14px;
+        justify-content: center;
     }
 
     .season-info {
@@ -121,7 +146,7 @@
         display: flex;
         gap: 10px;
         align-items: center;
-        margin-bottom: 12px;
+        margin-bottom: 4px;
     }
 
     .season-progress-bar {
@@ -144,25 +169,19 @@
         white-space: nowrap;
     }
 
-    /* Кнопка «Просмотрено» */
-    .season-actions {
-        display: flex;
-        gap: 8px;
-        padding: 0 12px 12px;
+    .flip-hint {
+        color: var(--text-faint);
+        font-size: 11px;
+        margin-top: 6px;
     }
 
-    .season-actions>form {
-        flex: 1;
-        display: flex;
-        margin: 0;
-    }
-
+    /* Кнопки на обороте */
     .season-btn {
         width: 100%;
-        padding: 8px 12px;
+        padding: 9px 12px;
         border-radius: 6px;
         border: 1px solid var(--border-light);
-        background: var(--bg-hover);
+        background: var(--bg-card);
         color: var(--text);
         font-size: 13px;
         cursor: pointer;
@@ -249,14 +268,30 @@
 <div class="seasons-list">
     {% for s in seasons %}
     <div class="season-card">
-        <a class="season-poster-link" href="/title/{{ card.external_id }}/season/{{ s.season_number }}"
-            title="Открыть список эпизодов">
-            {% if s.poster_url %}
-            <img src="{{ s.poster_url }}" alt="Сезон {{ s.season_number }}">
-            {% else %}
-            <div class="no-poster">нет постера</div>
-            {% endif %}
-        </a>
+        <div class="flip">
+            <div class="flip-inner">
+                <div class="flip-front">
+                    {% if s.poster_url %}
+                    <img src="{{ s.poster_url }}" alt="Сезон {{ s.season_number }}">
+                    {% else %}
+                    <div class="no-poster">нет постера</div>
+                    {% endif %}
+                </div>
+                <div class="flip-back">
+                    {% if s.total_count > 0 %}
+                    <form method="post" action="/watch-season/{{ card.external_id }}/{{ s.season_number }}">
+                        <button type="submit"
+                            class="season-btn {% if s.percent == 100 %}watched{% elif s.watched_count > 0 %}partial{% endif %}">
+                            {% if s.percent == 100 %}✓ Просмотрено{% else %}Отметить просмотренным{% endif %}
+                        </button>
+                    </form>
+                    {% endif %}
+                    <a class="season-btn" href="/title/{{ card.external_id }}/season/{{ s.season_number }}">📋 Список
+                        эпизодов</a>
+                </div>
+            </div>
+        </div>
+
         <div class="season-info">
             <div class="season-name">Сезон {{ s.season_number }}{% if s.name %}: {{ s.name }}{% endif %}</div>
             {% if s.date_human %}<div class="season-date">{{ s.date_human }}</div>{% endif %}
@@ -268,21 +303,24 @@
                 <span class="season-progress-text">{{ s.watched_count }}/{{ s.total_count }}</span>
             </div>
             {% endif %}
+            <div class="flip-hint">Нажмите на постер, чтобы открыть действия</div>
         </div>
-        {% if s.total_count > 0 %}
-        <div class="season-actions">
-            <form method="post" action="/watch-season/{{ card.external_id }}/{{ s.season_number }}">
-                <button type="submit"
-                    class="season-btn {% if s.percent == 100 %}watched{% elif s.watched_count > 0 %}partial{% endif %}">
-                    {% if s.percent == 100 %}✓ Просмотрено{% else %}Просмотрено{% endif %}
-                </button>
-            </form>
-        </div>
-        {% endif %}
     </div>
     {% endfor %}
 </div>
 {% else %}
 <p class="empty">Сезоны не найдены.</p>
 {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('click', function (e) {
+        const flip = e.target.closest('.flip');
+        if (!flip) return;
+        // Не переворачиваем обратно, если клик по кнопке/ссылке на обороте
+        if (e.target.closest('a') || e.target.closest('button')) return;
+        flip.classList.toggle('flipped');
+    });
+</script>
 {% endblock %}
