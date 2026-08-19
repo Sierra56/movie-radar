@@ -599,8 +599,10 @@
             {% if c.next_episode_short %}
             <span class="poster-badge next">📺 След. серия: {{ c.next_episode_short }}</span>
             <span class="poster-badge airing">Выходит</span>
-            {% else %}
+            {% elif c.tmdb_status in ('Ended', 'Canceled') %}
             <span class="poster-badge finished">Завершён</span>
+            {% else %}
+            <span class="poster-badge airing">Выходит</span>
             {% endif %}
             {% else %}
             {% if c.badge %}<span class="poster-badge {{ 'out' if c.released else 'soon' }}">{{ c.badge }}</span>{%

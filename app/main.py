@@ -268,7 +268,8 @@ class TmdbSource(Source):
         return {"external_id": f"tmdb:{media_type}:{tmdb_id}", "title": title, "type": type_,
                 "release_date": self._parse_date(release),
                 "poster_url": f"{self._POSTER}{d['poster_path']}" if d.get("poster_path") else None,
-                "genres": ", ".join(g["name"] for g in d.get("genres", []))}
+                "genres": ", ".join(g["name"] for g in d.get("genres", [])),
+                "status": d.get("status")}
 
     async def search(self, query):
         data = await self._get("/search/multi", {"query": query})
@@ -347,7 +348,7 @@ def ensure_schema():
             external_id TEXT PRIMARY KEY, title TEXT NOT NULL, type TEXT, release_date TEXT,
             poster_url TEXT, genres TEXT, source TEXT, added_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT, notify_enabled INTEGER DEFAULT 1)""", write=True)
-    for col in ("genres", "source", "updated_at", "notify_enabled"):
+    for col in ("genres", "source", "updated_at", "notify_enabled", "tmdb_status"):
         try:
             db(f"ALTER TABLE titles ADD COLUMN {col} TEXT", write=True)
         except sqlite3.OperationalError:
@@ -807,6 +808,13 @@ def get_next_season(external_id):
     return dict(rows[0]) if rows else None
 
 
+def get_next_episode_date(external_id):
+    rows = db("""SELECT e.release_date FROM episodes e JOIN seasons s ON e.season_id=s.id
+                 WHERE s.title_external_id=? AND e.release_date >= date('now')
+                 ORDER BY e.release_date LIMIT 1""", (external_id,))
+    return rows[0]["release_date"] if rows else None
+
+
 def update_next_episode_air_date(external_id):
     dist = get_distribution(external_id)
     if not dist:
@@ -1115,7 +1123,7 @@ async def refresh_catalog():
             continue
         if row["release_date"]:
             try:
-                if date.fromisoformat(row["release_date"]) < today - timedelta(days=30):
+                if date.fromisoformat(row["release_date"]) < today - timedelta(days=30) and row["type"] != "series":
                     skipped += 1
                     refresh_progress["done"] = i + 1
                     continue
@@ -1135,6 +1143,8 @@ async def refresh_catalog():
         if not fresh:
             refresh_progress["done"] = i + 1
             continue
+        if src.name == "tmdb" and fresh.get("status"):
+            db("UPDATE titles SET tmdb_status=? WHERE external_id=?", (fresh["status"], row["external_id"]), write=True)
         changed = False
         nt, nrd, ng = fresh["title"] or row["title"], fresh["release_date"] or row["release_date"], fresh["genres"] or row["genres"]
         if nt != row["title"]:
@@ -1202,6 +1212,8 @@ async def refresh_single(external_id):
         return False
     if not fresh:
         return False
+    if src.name == "tmdb" and fresh.get("status"):
+        db("UPDATE titles SET tmdb_status=? WHERE external_id=?", (fresh["status"], external_id), write=True)
     changed = False
     nt, nrd, ng = fresh["title"] or row["title"], fresh["release_date"] or row["release_date"], fresh["genres"] or row["genres"]
     date_change = None
@@ -1944,21 +1956,21 @@ async def index(request: Request, sort: str = "date", err: str | None = None, ms
             c["watch_label"] = f"{w}/{t}" if t > 0 else None
             c["watch_percent"] = progress_percent(w, t)
             c["watch_total"] = t
+            next_ep = get_next_episode_date(c["external_id"])
+            c["next_episode_short"] = short_date(next_ep) if next_ep else None
         else:
             c["watch_total"] = 0
+            c["next_episode_short"] = None
         c["display_poster"] = ensure_proxied(c.get("poster_url"))
         dist = get_distribution(c["external_id"])
         c["has_distribution"] = dist is not None
         c["distribution_status"] = dist["status"] if dist else None
         c["new_count"] = dist["new_files_count"] if dist else 0
-        c["next_episode_short"] = None
         if dist:
             c.update(distribution_url=dist["url"], distribution_download_path=dist["download_path"],
                      distribution_mode=dist["mode"],
                      distribution_check_interval_hours=dist["check_interval_hours"],
                      distribution_tracker=dist["tracker_name"])
-            if dist.get("next_episode_air_date"):
-                c["next_episode_short"] = short_date(dist["next_episode_air_date"])
             pat = get_pattern(dist["id"])
             if pat:
                 samples = json.loads(pat["samples_json"] or "[]")
@@ -2024,8 +2036,8 @@ async def add_select(external_id: str = Form(...), source: str = Form("tmdb"), r
     if not info:
         return RedirectResponse("/new?msg=search-fail", status_code=303)
     rd = info["release_date"] or release_date or None
-    db("INSERT OR REPLACE INTO titles (external_id, title, type, release_date, poster_url, genres, source, updated_at) VALUES (?,?,?,?,?,?,?,datetime('now'))",
-       (info["external_id"], info["title"], info["type"], rd, await download_card_poster(info), info["genres"], src.name), write=True)
+    db("INSERT OR REPLACE INTO titles (external_id, title, type, release_date, poster_url, genres, source, updated_at, tmdb_status) VALUES (?,?,?,?,?,?,?,datetime('now'),?)",
+       (info["external_id"], info["title"], info["type"], rd, await download_card_poster(info), info["genres"], src.name, info.get("status")), write=True)
     if info["type"] == "series" and src.name == "tmdb":
         tmdb_id = parse_tmdb_id(info["external_id"])
         if tmdb_id is not None:
@@ -2412,4 +2424,4 @@ async def watch_episode(external_id: str, season_number: int, episode_number: in
 @app.post("/watch-season/{external_id}/{season_number}")
 async def watch_season(external_id: str, season_number: int):
     toggle_season_watched(external_id, season_number)
-    return RedirectResponse(f"/title/{external_id}", status_code=303)
+    return RedirectResponse(f"/title/{external_id}", status_code=303)    
