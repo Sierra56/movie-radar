@@ -69,19 +69,39 @@
         border: 1px dashed var(--accent);
     }
 
-    /* ── Постер и оверлеи ── */
-    .poster-wrap {
-        position: relative;
-    }
-
-    .poster-link {
-        display: block;
-    }
-
-    .poster-link img,
-    .no-poster {
+    /* ── Флип-постер ── */
+    .flip {
+        perspective: 1000px;
         width: 100%;
         aspect-ratio: 2/3;
+        cursor: pointer;
+    }
+
+    .flip-inner {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        transition: transform .5s;
+        transform-style: preserve-3d;
+    }
+
+    .flip.flipped .flip-inner {
+        transform: rotateY(180deg);
+    }
+
+    .flip-front,
+    .flip-back {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        backface-visibility: hidden;
+        -webkit-backface-visibility: hidden;
+    }
+
+    .flip-front img,
+    .flip-front .no-poster {
+        width: 100%;
+        height: 100%;
         object-fit: cover;
         display: block;
     }
@@ -94,18 +114,96 @@
         color: var(--no-poster-text);
     }
 
-    .source-tag {
-        position: absolute;
-        top: 6px;
-        left: 6px;
-        background: rgba(0, 0, 0, .6);
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-size: 11px;
-        color: #fff;
-        z-index: 2;
+    .flip-back {
+        transform: rotateY(180deg);
+        background: var(--bg-hover);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 10px;
     }
 
+    .flip-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .source-back {
+        align-self: flex-start;
+        margin-top: auto;
+        background: rgba(0, 0, 0, .5);
+        color: #fff;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+    }
+
+    .flip-btn {
+        width: 100%;
+        padding: 7px 8px;
+        border-radius: 6px;
+        font-size: 12px;
+        background: transparent;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        border: 1px solid;
+        font-weight: 500;
+        transition: background .15s, filter .15s;
+        white-space: nowrap;
+        text-decoration: none;
+    }
+
+    .flip-btn:hover {
+        filter: brightness(1.25);
+        background: rgba(255, 255, 255, .06);
+    }
+
+    .flip-btn:disabled {
+        opacity: .35;
+        cursor: not-allowed;
+    }
+
+    .btn-blue {
+        border-color: #4f8cff;
+        color: #4f8cff;
+    }
+
+    .btn-red {
+        border-color: #ff5c5c;
+        color: #ff5c5c;
+    }
+
+    .btn-orange {
+        border-color: #f5a623;
+        color: #f5a623;
+    }
+
+    .btn-green {
+        border-color: #3ddc84;
+        color: #3ddc84;
+    }
+
+    .btn-purple {
+        border-color: #b07ce8;
+        color: #b07ce8;
+    }
+
+    .count-badge {
+        margin-left: 4px;
+        background: var(--error);
+        color: #fff;
+        border-radius: 999px;
+        padding: 0 7px;
+        font-size: 11px;
+        line-height: 16px;
+        display: inline-block;
+    }
+
+    /* Оверлеи лицевой стороны */
     .poster-icons {
         position: absolute;
         top: 6px;
@@ -183,51 +281,6 @@
         color: #9aa1b0;
     }
 
-    /* ── Выпадающее меню ⋮ ── */
-    .card-menu {
-        position: absolute;
-        top: 38px;
-        right: 6px;
-        z-index: 10;
-        min-width: 190px;
-        background: var(--bg-card);
-        border: 1px solid var(--border-light);
-        border-radius: 8px;
-        padding: 6px;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
-    }
-
-    .card-menu[hidden] {
-        display: none !important;
-    }
-
-    .card-menu form {
-        display: contents;
-    }
-
-    .card-menu button {
-        width: 100%;
-        text-align: left;
-        padding: 8px 10px;
-        border-radius: 6px;
-        border: 0;
-        background: transparent;
-        color: var(--text);
-        font-size: 13px;
-        cursor: pointer;
-    }
-
-    .card-menu button:hover {
-        background: var(--bg-hover);
-    }
-
-    .card-menu button.danger {
-        color: var(--error);
-    }
-
     /* ── Инфо-блок ── */
     .info {
         padding: 12px 12px 8px;
@@ -296,6 +349,12 @@
         white-space: nowrap;
     }
 
+    .flip-hint {
+        color: var(--text-faint);
+        font-size: 11px;
+        margin-top: 6px;
+    }
+
     .empty {
         color: var(--text-muted);
         margin-top: 20px;
@@ -327,56 +386,6 @@
         font-size: 13px;
         color: var(--text-muted);
         margin-top: 6px;
-    }
-
-    /* ── Единственный CTA ── */
-    .card-buttons {
-        padding: 10px 12px 12px;
-        margin-top: auto;
-        flex: 0 0 auto;
-    }
-
-    .btn-full {
-        width: 100%;
-        padding: 9px 12px;
-        border-radius: 8px;
-        font-size: 13px;
-        background: transparent;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        border: 1px solid;
-        font-weight: 600;
-        transition: background .15s, filter .15s;
-        white-space: nowrap;
-    }
-
-    .btn-full:hover {
-        filter: brightness(1.25);
-        background: rgba(255, 255, 255, .06);
-    }
-
-    .btn-green {
-        border-color: #3ddc84;
-        color: #3ddc84;
-    }
-
-    .btn-dist-add {
-        border-color: #b07ce8;
-        color: #b07ce8;
-    }
-
-    .count-badge {
-        margin-left: 4px;
-        background: var(--error);
-        color: #fff;
-        border-radius: 999px;
-        padding: 0 7px;
-        font-size: 11px;
-        line-height: 16px;
-        display: inline-block;
     }
 
     /* ── Модалка ── */
@@ -578,59 +587,78 @@
     <article class="card {{ 'local' if c.source == 'local' else '' }}" {% if c.updated_at
         %}title="обновлено: {{ c.updated_at }}" {% endif %}>
 
-        <div class="poster-wrap">
-            <a href="/title/{{ c.external_id }}" class="poster-link">
-                {% if c.display_poster %}<img src="{{ c.display_poster }}" alt="{{ c.title }}" loading="lazy">
-                {% else %}<div class="no-poster">нет постера</div>{% endif %}
-            </a>
+        <div class="flip">
+            <div class="flip-inner">
+                <div class="flip-front">
+                    {% if c.display_poster %}<img src="{{ c.display_poster }}" alt="{{ c.title }}" loading="lazy">
+                    {% else %}<div class="no-poster">нет постера</div>{% endif %}
 
-            {% if c.source %}<span class="source-tag">{{ c.source }}</span>{% endif %}
+                    <div class="poster-icons">
+                        <form method="post" action="/toggle-notify/{{ c.external_id }}?sort={{ sort }}">
+                            <button class="icon-btn bell {{ '' if c.notify_enabled else 'off' }}" type="submit"
+                                title="{{ 'Выключить уведомления' if c.notify_enabled else 'Включить уведомления' }}">
+                                {{ '🔔' if c.notify_enabled else '🔕' }}
+                            </button>
+                        </form>
+                    </div>
 
-            <div class="poster-icons">
-                <button class="icon-btn menu-btn" type="button" aria-label="Действия">⋮</button>
-                <form method="post" action="/toggle-notify/{{ c.external_id }}?sort={{ sort }}">
-                    <button class="icon-btn bell {{ '' if c.notify_enabled else 'off' }}" type="submit"
-                        title="{{ 'Выключить уведомления' if c.notify_enabled else 'Включить уведомления' }}">
-                        {{ '🔔' if c.notify_enabled else '🔕' }}
-                    </button>
-                </form>
-            </div>
+                    {% if c.type == 'series' %}
+                    {% if c.next_episode_short %}
+                    <span class="poster-badge next">📺 След. серия: {{ c.next_episode_short }}</span>
+                    <span class="poster-badge airing">Выходит</span>
+                    {% elif c.tmdb_status in ('Ended', 'Canceled') %}
+                    <span class="poster-badge finished">Завершён</span>
+                    {% else %}
+                    <span class="poster-badge airing">Выходит</span>
+                    {% endif %}
+                    {% else %}
+                    {% if c.badge %}<span class="poster-badge {{ 'out' if c.released else 'soon' }}">{{ c.badge
+                        }}</span>{% endif %}
+                    {% endif %}
+                </div>
 
-            {% if c.type == 'series' %}
-            {% if c.next_episode_short %}
-            <span class="poster-badge next">📺 След. серия: {{ c.next_episode_short }}</span>
-            <span class="poster-badge airing">Выходит</span>
-            {% elif c.tmdb_status in ('Ended', 'Canceled') %}
-            <span class="poster-badge finished">Завершён</span>
-            {% else %}
-            <span class="poster-badge airing">Выходит</span>
-            {% endif %}
-            {% else %}
-            {% if c.badge %}<span class="poster-badge {{ 'out' if c.released else 'soon' }}">{{ c.badge }}</span>{%
-            endif %}
-            {% endif %}
+                <div class="flip-back">
+                    <div class="flip-actions">
+                        {% if c.has_distribution %}
+                        <form method="post" action="/distribution/download/{{ c.external_id }}?sort={{ sort }}"
+                            class="js-download-form" data-title="{{ c.title|e }}">
+                            <button class="flip-btn btn-green" type="submit">
+                                ⬇ Скачать торрент{% if c.new_count %}<span class="count-badge">{{ c.new_count
+                                    }}</span>{% endif %}
+                            </button>
+                        </form>
+                        {% else %}
+                        <button class="flip-btn btn-purple js-dist-btn" type="button" data-id="{{ c.external_id }}"
+                            data-title="{{ c.title|e }}" data-has="false">
+                            🎬 Добавить раздачу
+                        </button>
+                        {% endif %}
 
-            <div class="card-menu" hidden>
-                {% if c.source != 'local' %}
-                <form method="post" action="/refresh/{{ c.external_id }}?sort={{ sort }}">
-                    <button type="submit">🔄 Обновить информацию</button>
-                </form>
-                {% endif %}
-                {% if c.has_distribution %}
-                <button type="button" class="js-dist-btn" data-id="{{ c.external_id }}" data-title="{{ c.title|e }}"
-                    data-has="true" data-url="{{ (c.distribution_url or '')|e }}"
-                    data-path="{{ (c.distribution_download_path or '')|e }}"
-                    data-mode="{{ (c.distribution_mode or 'smart')|e }}"
-                    data-interval="{{ c.distribution_check_interval_hours or 6 }}">
-                    🎬 Изменить раздачу
-                </button>
-                <form method="post" action="/distribution/check/{{ c.external_id }}?sort={{ sort }}">
-                    <button type="submit">⟳ Проверить обновление</button>
-                </form>
-                {% endif %}
-                <form method="post" action="/delete/{{ c.external_id }}?sort={{ sort }}">
-                    <button type="submit" class="danger">🗑 Удалить</button>
-                </form>
+                        {% if c.source != 'local' %}
+                        <form method="post" action="/refresh/{{ c.external_id }}?sort={{ sort }}">
+                            <button class="flip-btn btn-blue" type="submit">🔄 Обновить информацию</button>
+                        </form>
+                        {% endif %}
+
+                        {% if c.has_distribution %}
+                        <button class="flip-btn btn-purple js-dist-btn" type="button" data-id="{{ c.external_id }}"
+                            data-title="{{ c.title|e }}" data-has="true" data-url="{{ (c.distribution_url or '')|e }}"
+                            data-path="{{ (c.distribution_download_path or '')|e }}"
+                            data-mode="{{ (c.distribution_mode or 'smart')|e }}"
+                            data-interval="{{ c.distribution_check_interval_hours or 6 }}">
+                            🎬 Изменить раздачу
+                        </button>
+                        <form method="post" action="/distribution/check/{{ c.external_id }}?sort={{ sort }}">
+                            <button class="flip-btn btn-orange" type="submit">⟳ Проверить обновление</button>
+                        </form>
+                        {% endif %}
+
+                        <form method="post" action="/delete/{{ c.external_id }}?sort={{ sort }}">
+                            <button class="flip-btn btn-red" type="submit">🗑 Удалить</button>
+                        </form>
+                    </div>
+                    <span class="source-back">{{ c.source }}</span>
+                </div>
             </div>
         </div>
 
@@ -651,22 +679,7 @@
                 <span class="watch-text">{{ c.watch_label }}</span>
             </div>
             {% endif %}
-        </div>
-
-        <div class="card-buttons">
-            {% if c.has_distribution %}
-            <form method="post" action="/distribution/download/{{ c.external_id }}?sort={{ sort }}"
-                class="js-download-form" data-title="{{ c.title|e }}">
-                <button class="btn-full btn-green" type="submit">
-                    ⬇ Скачать торрент{% if c.new_count %}<span class="count-badge">{{ c.new_count }}</span>{% endif %}
-                </button>
-            </form>
-            {% else %}
-            <button class="btn-full btn-dist-add js-dist-btn" type="button" data-id="{{ c.external_id }}"
-                data-title="{{ c.title|e }}" data-has="false">
-                🎬 Добавить раздачу
-            </button>
-            {% endif %}
+            <div class="flip-hint">Нажмите на постер, чтобы открыть действия</div>
         </div>
     </article>
     {% else %}
@@ -781,10 +794,6 @@
 
     const distModal = document.getElementById('dist-modal');
 
-    function closeAllMenus() {
-        document.querySelectorAll('.card-menu').forEach(m => m.hidden = true);
-    }
-
     function switchTab(name) {
         document.querySelectorAll('.mtab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
         document.getElementById('tab-main').style.display = name === 'main' ? '' : 'none';
@@ -810,7 +819,6 @@
     }
 
     function openDistModal(btn) {
-        closeAllMenus();
         const id = btn.dataset.id;
         const title = btn.dataset.title || '';
         const has = btn.dataset.has === 'true';
@@ -841,16 +849,13 @@
     function closeDistModal() { distModal.classList.remove('open'); }
 
     document.addEventListener('click', function (e) {
-        const menuBtn = e.target.closest('.menu-btn');
-        if (menuBtn) {
-            e.preventDefault(); e.stopPropagation();
-            const menu = menuBtn.closest('.poster-wrap').querySelector('.card-menu');
-            const wasHidden = menu.hidden;
-            closeAllMenus();
-            menu.hidden = !wasHidden;
+        // Флип: переворот по клику на постер, но не по кнопкам/ссылкам/формам
+        const flip = e.target.closest('.flip');
+        if (flip) {
+            if (e.target.closest('a') || e.target.closest('button')) return;
+            flip.classList.toggle('flipped');
             return;
         }
-        if (!e.target.closest('.card-menu')) closeAllMenus();
 
         const btn = e.target.closest('.js-dist-btn');
         if (btn) { e.preventDefault(); openDistModal(btn); return; }
@@ -861,7 +866,7 @@
     document.getElementById('dist-modal-close').addEventListener('click', closeDistModal);
     document.getElementById('dist-modal-cancel').addEventListener('click', closeDistModal);
     distModal.addEventListener('click', function (e) { if (e.target === distModal) closeDistModal(); });
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeDistModal(); closeAllMenus(); } });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDistModal(); });
 
     document.addEventListener('submit', function (e) {
         const form = e.target.closest('.js-download-form');
