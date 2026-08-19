@@ -332,11 +332,16 @@
         font-size: 11px;
     }
 
-    .seasons-text {
+    .seasons-link {
         display: block;
-        color: var(--text-muted);
+        color: var(--accent);
+        text-decoration: none;
         font-size: 13px;
         min-height: 1.6em;
+    }
+
+    .seasons-link:hover {
+        text-decoration: underline;
     }
 
     .watch-row {
@@ -686,8 +691,8 @@
             <div class="tags">{% for g in c.genres_list %}<span class="tag">{{ g }}</span>{% endfor %}</div>
             {% endif %}
             {% if c.type == 'series' %}
-            <div class="seasons-text">📺 {{ c.season_count or 0 }} сезон(ов){% if c.next_season_date_human %} ·
-                следующий: {{ c.next_season_date_human }}{% endif %}</div>
+            <a class="seasons-link" href="/title/{{ c.external_id }}">📺 {{ c.season_count or 0 }} сезон(ов){% if
+                c.next_season_date_human %} · следующий: {{ c.next_season_date_human }}{% endif %}</a>
             {% endif %}
             {% if c.watch_total %}
             <div class="watch-row">
@@ -867,18 +872,14 @@
     function closeDistModal() { distModal.classList.remove('open'); }
 
     document.addEventListener('click', function (e) {
-        // 1) Кнопки раздачи (модалка) — обрабатываем ДО логики флипа
         const btn = e.target.closest('.js-dist-btn');
         if (btn) { e.preventDefault(); openDistModal(btn); return; }
 
-        // 2) Флип постера
         const flip = e.target.closest('.flip');
         if (flip) {
-            // клик по кнопке/ссылке/форме на обороте или колокольчику — не переворачиваем
             if (e.target.closest('a') || e.target.closest('button')) return;
             const toBack = !flip.classList.contains('flipped');
             flip.classList.toggle('flipped');
-            // При первом перевороте гасим точку-уведомление и помечаем прочитанным
             if (toBack) {
                 const dot = flip.querySelector('.new-dot');
                 if (dot) {
