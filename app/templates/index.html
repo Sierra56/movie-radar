@@ -65,7 +65,16 @@
         flex-direction: column;
     }
 
-    .card img,
+    .card.local {
+        border: 1px dashed var(--accent);
+    }
+
+    /* ── Постер и оверлеи ── */
+    .poster-wrap {
+        position: relative;
+    }
+
+    .poster-wrap img,
     .no-poster {
         width: 100%;
         aspect-ratio: 2/3;
@@ -85,7 +94,7 @@
         position: absolute;
         top: 6px;
         left: 6px;
-        background: var(--tag-bg);
+        background: rgba(0, 0, 0, .6);
         padding: 2px 6px;
         border-radius: 4px;
         font-size: 11px;
@@ -93,6 +102,125 @@
         z-index: 2;
     }
 
+    .poster-icons {
+        position: absolute;
+        top: 6px;
+        right: 6px;
+        display: flex;
+        gap: 4px;
+        z-index: 4;
+    }
+
+    .icon-btn {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        border: 0;
+        cursor: pointer;
+        background: rgba(0, 0, 0, .6);
+        color: #fff;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background .15s;
+    }
+
+    .icon-btn:hover {
+        background: rgba(0, 0, 0, .85);
+    }
+
+    .icon-btn.bell.off {
+        opacity: .55;
+        filter: grayscale(1);
+    }
+
+    .poster-badge {
+        position: absolute;
+        padding: 3px 8px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 600;
+        z-index: 2;
+    }
+
+    .poster-badge.next {
+        left: 6px;
+        bottom: 6px;
+        background: rgba(79, 140, 255, .92);
+        color: #fff;
+    }
+
+    .poster-badge.soon {
+        left: 6px;
+        bottom: 6px;
+        background: rgba(79, 140, 255, .92);
+        color: #fff;
+    }
+
+    .poster-badge.out {
+        left: 6px;
+        bottom: 6px;
+        background: rgba(245, 166, 35, .92);
+        color: #10131a;
+    }
+
+    .poster-badge.airing {
+        right: 6px;
+        bottom: 6px;
+        background: rgba(61, 220, 132, .92);
+        color: #10131a;
+    }
+
+    .poster-badge.finished {
+        left: 6px;
+        bottom: 6px;
+        background: rgba(10, 12, 18, .75);
+        color: #9aa1b0;
+    }
+
+    /* ── Выпадающее меню ⋮ ── */
+    .card-menu {
+        position: absolute;
+        top: 38px;
+        right: 6px;
+        z-index: 10;
+        min-width: 190px;
+        background: var(--bg-card);
+        border: 1px solid var(--border-light);
+        border-radius: 8px;
+        padding: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+    }
+
+    .card-menu form {
+        display: contents;
+    }
+
+    .card-menu button {
+        width: 100%;
+        text-align: left;
+        padding: 8px 10px;
+        border-radius: 6px;
+        border: 0;
+        background: transparent;
+        color: var(--text);
+        font-size: 13px;
+        cursor: pointer;
+    }
+
+    .card-menu button:hover {
+        background: var(--bg-hover);
+    }
+
+    .card-menu button.danger {
+        color: var(--error);
+    }
+
+    /* ── Инфо-блок ── */
     .info {
         padding: 12px 12px 8px;
         flex: 1 1 auto;
@@ -105,47 +233,25 @@
         min-height: 2.8em;
     }
 
-    .info .row {
-        margin: 0 0 4px;
-        line-height: 1.4;
+    .year {
+        color: var(--text-faint);
+        font-weight: 400;
+        font-size: 13px;
     }
 
-    .row.meta {
-        min-height: 1.4em;
+    .tags {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+        margin-bottom: 6px;
+        min-height: 1.6em;
+    }
+
+    .tag {
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: var(--bg-hover);
         color: var(--text-muted);
-        font-size: 13px;
-    }
-
-    .row.next-ep {
-        min-height: 1.4em;
-        color: var(--accent);
-        font-size: 12px;
-    }
-
-    .row.genre {
-        min-height: 2.8em;
-        color: var(--text-faint);
-        font-size: 12px;
-    }
-
-    .row.seasons {
-        min-height: 2.6em;
-        font-size: 13px;
-    }
-
-    .row.watch {
-        min-height: 1.4em;
-        color: var(--success);
-        font-size: 12px;
-    }
-
-    .row.badge-row {
-        min-height: 1.7em;
-    }
-
-    .row.updated {
-        min-height: 1.3em;
-        color: var(--text-faint);
         font-size: 11px;
     }
 
@@ -153,24 +259,38 @@
         display: block;
         color: var(--accent);
         text-decoration: none;
+        font-size: 13px;
+        min-height: 1.6em;
     }
 
     .seasons-link:hover {
         text-decoration: underline;
     }
 
-    .badge {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: 999px;
-        background: var(--accent-bg);
-        color: var(--accent-text);
-        font-size: 12px;
+    .watch-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
     }
 
-    .badge.out {
-        background: var(--warning-bg);
-        color: var(--warning-text);
+    .watch-bar {
+        flex: 1;
+        height: 4px;
+        border-radius: 2px;
+        background: var(--bg-hover);
+        overflow: hidden;
+    }
+
+    .watch-fill {
+        height: 100%;
+        background: var(--success);
+    }
+
+    .watch-text {
+        font-size: 11px;
+        color: var(--text-faint);
+        white-space: nowrap;
     }
 
     .empty {
@@ -206,23 +326,16 @@
         margin-top: 6px;
     }
 
-    .card.local {
-        border: 1px dashed var(--accent);
-    }
-
+    /* ── Единственный CTA ── */
     .card-buttons {
         padding: 10px 12px 12px;
         margin-top: auto;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
         flex: 0 0 auto;
-        border-top: 1px solid var(--border);
     }
 
     .btn-full {
         width: 100%;
-        padding: 8px 12px;
+        padding: 9px 12px;
         border-radius: 8px;
         font-size: 13px;
         background: transparent;
@@ -232,7 +345,7 @@
         justify-content: center;
         gap: 8px;
         border: 1px solid;
-        font-weight: 500;
+        font-weight: 600;
         transition: background .15s, filter .15s;
         white-space: nowrap;
     }
@@ -240,31 +353,6 @@
     .btn-full:hover {
         filter: brightness(1.25);
         background: rgba(255, 255, 255, .06);
-    }
-
-    .btn-full:disabled {
-        opacity: .35;
-        cursor: not-allowed;
-    }
-
-    .btn-full:disabled:hover {
-        filter: none;
-        background: transparent;
-    }
-
-    .btn-blue {
-        border-color: #4f8cff;
-        color: #4f8cff;
-    }
-
-    .btn-red {
-        border-color: #ff5c5c;
-        color: #ff5c5c;
-    }
-
-    .btn-orange {
-        border-color: #f5a623;
-        color: #f5a623;
     }
 
     .btn-green {
@@ -277,29 +365,8 @@
         color: #b07ce8;
     }
 
-    .btn-dist-idle {
-        border-color: #4f8cff;
-        color: #4f8cff;
-    }
-
-    .btn-dist-has_new {
-        border-color: #3ddc84;
-        color: #3ddc84;
-    }
-
-    .btn-dist-error {
-        border-color: #f5a623;
-        color: #f5a623;
-    }
-
-    .btn-dist-dead {
-        border-color: #8b93a7;
-        color: #8b93a7;
-        opacity: .6;
-    }
-
     .count-badge {
-        margin-left: 6px;
+        margin-left: 4px;
         background: var(--error);
         color: #fff;
         border-radius: 999px;
@@ -307,35 +374,9 @@
         font-size: 11px;
         line-height: 16px;
         display: inline-block;
-        white-space: nowrap;
     }
 
-    .notify-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 4px 2px 0;
-    }
-
-    .notify-left {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 13px;
-        color: var(--text);
-        cursor: pointer;
-    }
-
-    .notify-left input {
-        width: 16px;
-        height: 16px;
-        cursor: pointer;
-    }
-
-    .notify-bell {
-        font-size: 16px;
-    }
-
+    /* ── Модалка ── */
     .modal-overlay {
         display: none;
         position: fixed;
@@ -531,68 +572,93 @@
 
 <div class="grid">
     {% for c in cards %}
-    <article class="card {{ 'local' if c.source == 'local' else '' }}">
-        {% if c.source %}<span class="source-tag">{{ c.source }}</span>{% endif %}
-        {% if c.display_poster %}<img src="{{ c.display_poster }}" alt="{{ c.title }}" loading="lazy">
-        {% else %}<div class="no-poster">нет постера</div>{% endif %}
+    <article class="card {{ 'local' if c.source == 'local' else '' }}" {% if c.updated_at
+        %}title="обновлено: {{ c.updated_at }}" {% endif %}>
+
+        <div class="poster-wrap">
+            {% if c.display_poster %}<img src="{{ c.display_poster }}" alt="{{ c.title }}" loading="lazy">
+            {% else %}<div class="no-poster">нет постера</div>{% endif %}
+
+            {% if c.source %}<span class="source-tag">{{ c.source }}</span>{% endif %}
+
+            <div class="poster-icons">
+                <button class="icon-btn menu-btn" type="button" aria-label="Действия">⋮</button>
+                <form method="post" action="/toggle-notify/{{ c.external_id }}?sort={{ sort }}">
+                    <button class="icon-btn bell {{ '' if c.notify_enabled else 'off' }}" type="submit"
+                        title="{{ 'Выключить уведомления' if c.notify_enabled else 'Включить уведомления' }}">
+                        {{ '🔔' if c.notify_enabled else '🔕' }}
+                    </button>
+                </form>
+            </div>
+
+            {% if c.type == 'series' %}
+            {% if c.next_episode_short %}
+            <span class="poster-badge next">📺 След. серия: {{ c.next_episode_short }}</span>
+            <span class="poster-badge airing">Выходит</span>
+            {% else %}
+            <span class="poster-badge finished">Завершён</span>
+            {% endif %}
+            {% else %}
+            {% if c.badge %}<span class="poster-badge {{ 'out' if c.released else 'soon' }}">{{ c.badge }}</span>{%
+            endif %}
+            {% endif %}
+
+            <div class="card-menu" hidden>
+                {% if c.source != 'local' %}
+                <form method="post" action="/refresh/{{ c.external_id }}?sort={{ sort }}">
+                    <button type="submit">🔄 Обновить информацию</button>
+                </form>
+                {% endif %}
+                {% if c.has_distribution %}
+                <button type="button" class="js-dist-btn" data-id="{{ c.external_id }}" data-title="{{ c.title|e }}"
+                    data-has="true" data-url="{{ (c.distribution_url or '')|e }}"
+                    data-path="{{ (c.distribution_download_path or '')|e }}"
+                    data-mode="{{ (c.distribution_mode or 'smart')|e }}"
+                    data-interval="{{ c.distribution_check_interval_hours or 6 }}">
+                    🎬 Изменить раздачу
+                </button>
+                <form method="post" action="/distribution/check/{{ c.external_id }}?sort={{ sort }}">
+                    <button type="submit">⟳ Проверить обновление</button>
+                </form>
+                {% endif %}
+                <form method="post" action="/delete/{{ c.external_id }}?sort={{ sort }}">
+                    <button type="submit" class="danger">🗑 Удалить</button>
+                </form>
+            </div>
+        </div>
 
         <div class="info">
-            <h2>{{ c.title }}</h2>
-            <div class="row meta">{% if c.date_human %}{{ c.date_human }}{% else %}дата неизвестна{% endif %}</div>
-            <div class="row next-ep">{% if c.next_episode_date_human %}📺 След. эпизод: {{ c.next_episode_date_human
-                }}{% endif %}</div>
-            <div class="row genre">{{ c.genres or '' }}</div>
-            <div class="row seasons">{% if c.type == 'series' %}<a class="seasons-link"
-                    href="/title/{{ c.external_id }}">📺 {{ c.season_count or 0 }} сезон(ов){% if
-                    c.next_season_date_human %} · следующий: {{ c.next_season_date_human }}{% endif %}</a>{% endif %}
+            <h2>{{ c.title }}{% if c.year %} <span class="year">({{ c.year }})</span>{% endif %}</h2>
+            {% if c.genres_list %}
+            <div class="tags">{% for g in c.genres_list %}<span class="tag">{{ g }}</span>{% endfor %}</div>
+            {% endif %}
+            {% if c.type == 'series' %}
+            <a class="seasons-link" href="/title/{{ c.external_id }}">📺 {{ c.season_count or 0 }} сезон(ов)</a>
+            {% endif %}
+            {% if c.watch_total %}
+            <div class="watch-row">
+                <div class="watch-bar">
+                    <div class="watch-fill" style="width:{{ c.watch_percent }}%"></div>
+                </div>
+                <span class="watch-text">{{ c.watch_label }}</span>
             </div>
-            <div class="row watch">{% if c.watch_label %}📊 {{ c.watch_label }} эп. ({{ c.watch_percent }}%){% endif %}
-            </div>
-            <div class="row badge-row">{% if c.badge %}<span class="badge {{ 'out' if c.released else '' }}">{{ c.badge
-                    }}</span>{% endif %}</div>
-            <div class="row updated">{% if c.updated_at %}обновлено: {{ c.updated_at }}{% endif %}</div>
+            {% endif %}
         </div>
 
         <div class="card-buttons">
-            {% if c.source != 'local' %}
-            <form method="post" action="/refresh/{{ c.external_id }}?sort={{ sort }}"><button class="btn-full btn-blue"
-                    type="submit">🔄 Обновить информацию</button></form>
-            {% endif %}
-            <form method="post" action="/delete/{{ c.external_id }}?sort={{ sort }}"><button class="btn-full btn-red"
-                    type="submit">🗑 Удалить</button></form>
-
             {% if c.has_distribution %}
-            <button class="btn-full btn-dist-{{ c.distribution_status }} js-dist-btn" type="button"
-                title="Раздача: {{ c.distribution_status }}" data-id="{{ c.external_id }}" data-title="{{ c.title|e }}"
-                data-has="true" data-url="{{ (c.distribution_url or '')|e }}"
-                data-path="{{ (c.distribution_download_path or '')|e }}"
-                data-mode="{{ (c.distribution_mode or 'smart')|e }}"
-                data-interval="{{ c.distribution_check_interval_hours or 6 }}">
-                🎬 Изменить раздачу{% if c.distribution_status == 'has_new' and c.new_count %}<span
-                    class="count-badge">{{ c.new_count }}</span>{% endif %}
-            </button>
+            <form method="post" action="/distribution/download/{{ c.external_id }}?sort={{ sort }}"
+                class="js-download-form" data-title="{{ c.title|e }}">
+                <button class="btn-full btn-green" type="submit">
+                    ⬇ Скачать торрент{% if c.new_count %}<span class="count-badge">{{ c.new_count }}</span>{% endif %}
+                </button>
+            </form>
             {% else %}
-            <button class="btn-full btn-dist-add js-dist-btn" type="button" title="Раздача ещё не добавлена"
-                data-id="{{ c.external_id }}" data-title="{{ c.title|e }}" data-has="false">
+            <button class="btn-full btn-dist-add js-dist-btn" type="button" data-id="{{ c.external_id }}"
+                data-title="{{ c.title|e }}" data-has="false">
                 🎬 Добавить раздачу
             </button>
             {% endif %}
-
-            <form method="post" action="/distribution/check/{{ c.external_id }}?sort={{ sort }}">
-                <button class="btn-full btn-orange" type="submit" {% if not c.has_distribution %}disabled{% endif %}>⟳
-                    Проверить обновление</button>
-            </form>
-            <form method="post" action="/distribution/download/{{ c.external_id }}?sort={{ sort }}"
-                class="js-download-form" data-title="{{ c.title|e }}">
-                <button class="btn-full btn-green" type="submit" {% if not c.has_distribution %}disabled{% endif %}>⬇
-                    Скачать торрент</button>
-            </form>
-
-            <form class="notify-row" method="post" action="/toggle-notify/{{ c.external_id }}?sort={{ sort }}">
-                <label class="notify-left"><input type="checkbox" {% if c.notify_enabled %}checked{% endif %}
-                        onchange="this.form.submit()"><span>Уведомления</span></label>
-                <span class="notify-bell">🔔</span>
-            </form>
         </div>
     </article>
     {% else %}
@@ -707,6 +773,10 @@
 
     const distModal = document.getElementById('dist-modal');
 
+    function closeAllMenus() {
+        document.querySelectorAll('.card-menu').forEach(m => m.hidden = true);
+    }
+
     function switchTab(name) {
         document.querySelectorAll('.mtab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
         document.getElementById('tab-main').style.display = name === 'main' ? '' : 'none';
@@ -732,6 +802,7 @@
     }
 
     function openDistModal(btn) {
+        closeAllMenus();
         const id = btn.dataset.id;
         const title = btn.dataset.title || '';
         const has = btn.dataset.has === 'true';
@@ -762,6 +833,19 @@
     function closeDistModal() { distModal.classList.remove('open'); }
 
     document.addEventListener('click', function (e) {
+        // ⋮ меню
+        const menuBtn = e.target.closest('.menu-btn');
+        if (menuBtn) {
+            e.preventDefault(); e.stopPropagation();
+            const menu = menuBtn.closest('.poster-wrap').querySelector('.card-menu');
+            const wasHidden = menu.hidden;
+            closeAllMenus();
+            menu.hidden = !wasHidden;
+            return;
+        }
+        // клик вне меню — закрыть
+        if (!e.target.closest('.card-menu')) closeAllMenus();
+
         const btn = e.target.closest('.js-dist-btn');
         if (btn) { e.preventDefault(); openDistModal(btn); return; }
         const tab = e.target.closest('.mtab');
@@ -771,7 +855,7 @@
     document.getElementById('dist-modal-close').addEventListener('click', closeDistModal);
     document.getElementById('dist-modal-cancel').addEventListener('click', closeDistModal);
     distModal.addEventListener('click', function (e) { if (e.target === distModal) closeDistModal(); });
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDistModal(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeDistModal(); closeAllMenus(); } });
 
     document.addEventListener('submit', function (e) {
         const form = e.target.closest('.js-download-form');

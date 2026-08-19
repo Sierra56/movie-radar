@@ -51,6 +51,9 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 MONTHS_RU = ["января", "февраля", "марта", "апреля", "мая", "июня",
              "июля", "августа", "сентября", "октября", "ноября", "декабря"]
 
+MONTHS_RU_SHORT = ["янв", "фев", "мар", "апр", "май", "июн",
+                   "июл", "авг", "сен", "окт", "ноя", "дек"]
+
 refresh_progress = {"running": False, "done": 0, "total": 0}
 
 BACKUP_VERSION = "1.0.1"
@@ -591,6 +594,16 @@ def human_date(iso):
     except ValueError:
         return None
     return f"{d.day} {MONTHS_RU[d.month - 1]} {d.year}"
+
+
+def short_date(iso):
+    if not iso:
+        return None
+    try:
+        d = date.fromisoformat(iso)
+    except ValueError:
+        return None
+    return f"{d.day} {MONTHS_RU_SHORT[d.month - 1]}"
 
 
 def plural(n, forms):
@@ -1411,7 +1424,6 @@ async def on_startup():
 @app.on_event("shutdown")
 async def on_shutdown():
     scheduler.shutdown()
-
 def escape_ics(s):
     if not s:
         return ""
@@ -1608,6 +1620,7 @@ async def get_manifest():
 async def get_sw():
     return Response(content=(STATIC_DIR / "sw.js").read_text(encoding="utf-8"),
                     media_type="application/javascript")
+
 
 async def check_distribution_now(title_external_id):
     dist = get_distribution(title_external_id)
@@ -1908,36 +1921,44 @@ async def index(request: Request, sort: str = "date", err: str | None = None, ms
     cards, patterns = [], {}
     for r in rows:
         c = dict(r)
-        c["date_human"] = human_date(c["release_date"])
         c["notify_enabled"] = c.get("notify_enabled") in (None, 1)
         c["badge"], c["released"] = None, False
         if c["release_date"]:
+            c["year"] = c["release_date"][:4]
             try:
                 delta = (date.fromisoformat(c["release_date"]) - today).days
-                c["badge"], c["released"] = ("уже вышло", True) if delta < 0 else ("сегодня!", False) if delta == 0 else (f"{delta} {plural(delta, ('день', 'дня', 'дней'))}", False)
+                if delta < 0:
+                    c["badge"], c["released"] = "уже вышло", True
+                elif delta == 0:
+                    c["badge"] = "сегодня!"
+                else:
+                    c["badge"] = f"{delta} {plural(delta, ('день', 'дня', 'дней'))}"
             except ValueError:
                 pass
+        else:
+            c["year"] = None
+        c["genres_list"] = [g.strip() for g in (c["genres"] or "").split(",") if g.strip()][:2]
         if c["type"] == "series":
             c["season_count"] = get_season_count(c["external_id"])
-            ns = get_next_season(c["external_id"])
-            c["next_season_date_human"] = human_date(ns["release_date"]) if ns else None
-            c["display_poster"] = (ns.get("poster_url") if ns else None) or c["poster_url"]
             w, t = get_show_progress(c["external_id"])
             c["watch_label"] = f"{w}/{t}" if t > 0 else None
             c["watch_percent"] = progress_percent(w, t)
+            c["watch_total"] = t
         else:
-            c["display_poster"] = c["poster_url"]
-        c["display_poster"] = ensure_proxied(c.get("display_poster"))
+            c["watch_total"] = 0
+        c["display_poster"] = ensure_proxied(c.get("poster_url"))
         dist = get_distribution(c["external_id"])
         c["has_distribution"] = dist is not None
         c["distribution_status"] = dist["status"] if dist else None
         c["new_count"] = dist["new_files_count"] if dist else 0
+        c["next_episode_short"] = None
         if dist:
             c.update(distribution_url=dist["url"], distribution_download_path=dist["download_path"],
-                     distribution_mode=dist["mode"], distribution_check_interval_hours=dist["check_interval_hours"],
+                     distribution_mode=dist["mode"],
+                     distribution_check_interval_hours=dist["check_interval_hours"],
                      distribution_tracker=dist["tracker_name"])
             if dist.get("next_episode_air_date"):
-                c["next_episode_date_human"] = human_date(dist["next_episode_air_date"])
+                c["next_episode_short"] = short_date(dist["next_episode_air_date"])
             pat = get_pattern(dist["id"])
             if pat:
                 samples = json.loads(pat["samples_json"] or "[]")
