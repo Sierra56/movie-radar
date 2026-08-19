@@ -9,16 +9,36 @@
         margin-bottom: 24px;
     }
 
+    /* Кликабельный основной постер с бейджем «Назад» */
     .title-poster {
+        position: relative;
         width: 200px;
         border-radius: 8px;
         overflow: hidden;
         flex-shrink: 0;
+        display: block;
     }
 
     .title-poster img {
         width: 100%;
         display: block;
+        transition: transform .2s;
+    }
+
+    .title-poster:hover img {
+        transform: scale(1.03);
+    }
+
+    .back-tag {
+        position: absolute;
+        left: 6px;
+        bottom: 6px;
+        background: rgba(0, 0, 0, .65);
+        color: #fff;
+        padding: 3px 10px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 600;
     }
 
     .title-info h1 {
@@ -201,13 +221,14 @@
 
 {% block content %}
 <div class="title-header">
-    <div class="title-poster">
+    <a href="/" class="title-poster" title="Вернуться на главную">
         {% if card.poster_url %}
         <img src="{{ card.poster_url }}" alt="{{ card.title }}">
         {% else %}
         <div class="no-poster">нет постера</div>
         {% endif %}
-    </div>
+        <span class="back-tag">← Назад</span>
+    </a>
     <div class="title-info">
         <h1>{{ card.title }}</h1>
         <p class="title-meta">
