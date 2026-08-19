@@ -117,14 +117,22 @@
         white-space: nowrap;
     }
 
+    /* Кнопки сезона: одинаковый дизайн и размер */
     .season-actions {
         display: flex;
         gap: 8px;
         padding: 0 12px 12px;
     }
 
-    .season-btn {
+    .season-actions>form,
+    .season-actions>a.season-btn {
         flex: 1;
+        display: flex;
+        margin: 0;
+    }
+
+    .season-btn {
+        width: 100%;
         padding: 8px 12px;
         border-radius: 6px;
         border: 1px solid var(--border-light);
@@ -137,6 +145,7 @@
         align-items: center;
         justify-content: center;
         gap: 6px;
+        box-sizing: border-box;
         transition: background .15s, filter .15s;
     }
 
@@ -234,7 +243,7 @@
         </div>
         <div class="season-actions">
             {% if s.total_count > 0 %}
-            <form method="post" action="/watch-season/{{ card.external_id }}/{{ s.season_number }}" style="flex:1;">
+            <form method="post" action="/watch-season/{{ card.external_id }}/{{ s.season_number }}">
                 <button type="submit"
                     class="season-btn {% if s.percent == 100 %}watched{% elif s.watched_count > 0 %}partial{% endif %}">
                     {% if s.percent == 100 %}✓ Просмотрено{% else %}Просмотрено{% endif %}

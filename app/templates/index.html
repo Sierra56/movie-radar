@@ -74,7 +74,11 @@
         position: relative;
     }
 
-    .poster-wrap img,
+    .poster-link {
+        display: block;
+    }
+
+    .poster-link img,
     .no-poster {
         width: 100%;
         aspect-ratio: 2/3;
@@ -259,16 +263,11 @@
         font-size: 11px;
     }
 
-    .seasons-link {
+    .seasons-text {
         display: block;
-        color: var(--accent);
-        text-decoration: none;
+        color: var(--text-muted);
         font-size: 13px;
         min-height: 1.6em;
-    }
-
-    .seasons-link:hover {
-        text-decoration: underline;
     }
 
     .watch-row {
@@ -580,8 +579,10 @@
         %}title="обновлено: {{ c.updated_at }}" {% endif %}>
 
         <div class="poster-wrap">
-            {% if c.display_poster %}<img src="{{ c.display_poster }}" alt="{{ c.title }}" loading="lazy">
-            {% else %}<div class="no-poster">нет постера</div>{% endif %}
+            <a href="/title/{{ c.external_id }}" class="poster-link">
+                {% if c.display_poster %}<img src="{{ c.display_poster }}" alt="{{ c.title }}" loading="lazy">
+                {% else %}<div class="no-poster">нет постера</div>{% endif %}
+            </a>
 
             {% if c.source %}<span class="source-tag">{{ c.source }}</span>{% endif %}
 
@@ -639,7 +640,8 @@
             <div class="tags">{% for g in c.genres_list %}<span class="tag">{{ g }}</span>{% endfor %}</div>
             {% endif %}
             {% if c.type == 'series' %}
-            <a class="seasons-link" href="/title/{{ c.external_id }}">📺 {{ c.season_count or 0 }} сезон(ов)</a>
+            <div class="seasons-text">📺 {{ c.season_count or 0 }} сезон(ов){% if c.next_season_date_human %} ·
+                следующий: {{ c.next_season_date_human }}{% endif %}</div>
             {% endif %}
             {% if c.watch_total %}
             <div class="watch-row">
@@ -839,7 +841,6 @@
     function closeDistModal() { distModal.classList.remove('open'); }
 
     document.addEventListener('click', function (e) {
-        // ⋮ меню
         const menuBtn = e.target.closest('.menu-btn');
         if (menuBtn) {
             e.preventDefault(); e.stopPropagation();
@@ -849,7 +850,6 @@
             menu.hidden = !wasHidden;
             return;
         }
-        // клик вне меню — закрыть
         if (!e.target.closest('.card-menu')) closeAllMenus();
 
         const btn = e.target.closest('.js-dist-btn');
