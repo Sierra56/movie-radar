@@ -1740,6 +1740,11 @@ async def check_distribution(title_external_id: str, sort: str = "date"):
     set_setting("last_dist_check", message)
     return RedirectResponse(f"/?sort={sort}&msg={'dist-checked' if ok else 'dist-check-fail'}", status_code=303)
 
+@app.post("/distribution/seen/{title_external_id}")
+async def distribution_seen(title_external_id: str):
+    db("UPDATE distributions SET new_files_count=0, status='idle' WHERE title_external_id=? AND status='has_new'",
+       (title_external_id,), write=True)
+    return JSONResponse({"ok": True})
 
 @app.post("/distribution/pattern/save/{title_external_id}")
 async def save_pattern(title_external_id: str, min_samples: int = Form(3), sort: str = "date"):

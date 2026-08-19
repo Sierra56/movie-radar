@@ -211,6 +211,7 @@
         display: flex;
         gap: 4px;
         z-index: 4;
+        align-items: center;
     }
 
     .icon-btn {
@@ -235,6 +236,21 @@
     .icon-btn.bell.off {
         opacity: .55;
         filter: grayscale(1);
+    }
+
+    .new-dot {
+        min-width: 20px;
+        height: 20px;
+        padding: 0 5px;
+        border-radius: 999px;
+        background: var(--error);
+        color: #fff;
+        font-size: 11px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 0 0 2px rgba(0, 0, 0, .4);
     }
 
     .poster-badge {
@@ -587,13 +603,15 @@
     <article class="card {{ 'local' if c.source == 'local' else '' }}" {% if c.updated_at
         %}title="обновлено: {{ c.updated_at }}" {% endif %}>
 
-        <div class="flip">
+        <div class="flip" data-id="{{ c.external_id }}">
             <div class="flip-inner">
                 <div class="flip-front">
                     {% if c.display_poster %}<img src="{{ c.display_poster }}" alt="{{ c.title }}" loading="lazy">
                     {% else %}<div class="no-poster">нет постера</div>{% endif %}
 
                     <div class="poster-icons">
+                        {% if c.new_count %}<span class="new-dot" title="Новые эпизоды: {{ c.new_count }}">{{
+                            c.new_count }}</span>{% endif %}
                         <form method="post" action="/toggle-notify/{{ c.external_id }}?sort={{ sort }}">
                             <button class="icon-btn bell {{ '' if c.notify_enabled else 'off' }}" type="submit"
                                 title="{{ 'Выключить уведомления' if c.notify_enabled else 'Включить уведомления' }}">
@@ -849,16 +867,28 @@
     function closeDistModal() { distModal.classList.remove('open'); }
 
     document.addEventListener('click', function (e) {
-        // Флип: переворот по клику на постер, но не по кнопкам/ссылкам/формам
+        // 1) Кнопки раздачи (модалка) — обрабатываем ДО логики флипа
+        const btn = e.target.closest('.js-dist-btn');
+        if (btn) { e.preventDefault(); openDistModal(btn); return; }
+
+        // 2) Флип постера
         const flip = e.target.closest('.flip');
         if (flip) {
+            // клик по кнопке/ссылке/форме на обороте или колокольчику — не переворачиваем
             if (e.target.closest('a') || e.target.closest('button')) return;
+            const toBack = !flip.classList.contains('flipped');
             flip.classList.toggle('flipped');
+            // При первом перевороте гасим точку-уведомление и помечаем прочитанным
+            if (toBack) {
+                const dot = flip.querySelector('.new-dot');
+                if (dot) {
+                    dot.remove();
+                    fetch('/distribution/seen/' + encodeURIComponent(flip.dataset.id), { method: 'POST' });
+                }
+            }
             return;
         }
 
-        const btn = e.target.closest('.js-dist-btn');
-        if (btn) { e.preventDefault(); openDistModal(btn); return; }
         const tab = e.target.closest('.mtab');
         if (tab) { switchTab(tab.dataset.tab); }
     });
