@@ -60,17 +60,24 @@
         flex-direction: column;
     }
 
-    .season-poster {
+    /* Кликабельный постер сезона */
+    .season-poster-link {
+        display: block;
         width: 100%;
         aspect-ratio: 2/3;
         overflow: hidden;
     }
 
-    .season-poster img {
+    .season-poster-link img {
         width: 100%;
         height: 100%;
         object-fit: cover;
         display: block;
+        transition: transform .2s;
+    }
+
+    .season-poster-link:hover img {
+        transform: scale(1.03);
     }
 
     .season-info {
@@ -117,15 +124,14 @@
         white-space: nowrap;
     }
 
-    /* Кнопки сезона: одинаковый дизайн и размер */
+    /* Кнопка «Просмотрено» */
     .season-actions {
         display: flex;
         gap: 8px;
         padding: 0 12px 12px;
     }
 
-    .season-actions>form,
-    .season-actions>a.season-btn {
+    .season-actions>form {
         flex: 1;
         display: flex;
         margin: 0;
@@ -222,13 +228,14 @@
 <div class="seasons-list">
     {% for s in seasons %}
     <div class="season-card">
-        <div class="season-poster">
+        <a class="season-poster-link" href="/title/{{ card.external_id }}/season/{{ s.season_number }}"
+            title="Открыть список эпизодов">
             {% if s.poster_url %}
             <img src="{{ s.poster_url }}" alt="Сезон {{ s.season_number }}">
             {% else %}
             <div class="no-poster">нет постера</div>
             {% endif %}
-        </div>
+        </a>
         <div class="season-info">
             <div class="season-name">Сезон {{ s.season_number }}{% if s.name %}: {{ s.name }}{% endif %}</div>
             {% if s.date_human %}<div class="season-date">{{ s.date_human }}</div>{% endif %}
@@ -241,17 +248,16 @@
             </div>
             {% endif %}
         </div>
+        {% if s.total_count > 0 %}
         <div class="season-actions">
-            {% if s.total_count > 0 %}
             <form method="post" action="/watch-season/{{ card.external_id }}/{{ s.season_number }}">
                 <button type="submit"
                     class="season-btn {% if s.percent == 100 %}watched{% elif s.watched_count > 0 %}partial{% endif %}">
                     {% if s.percent == 100 %}✓ Просмотрено{% else %}Просмотрено{% endif %}
                 </button>
             </form>
-            {% endif %}
-            <a href="/title/{{ card.external_id }}/season/{{ s.season_number }}" class="season-btn">📋 Эпизоды</a>
         </div>
+        {% endif %}
     </div>
     {% endfor %}
 </div>
