@@ -139,11 +139,12 @@
         font-size: 11px;
     }
 
+    /* Кнопки на обороте — крупнее */
     .flip-btn {
         width: 100%;
-        padding: 7px 8px;
-        border-radius: 6px;
-        font-size: 12px;
+        padding: 10px 8px;
+        border-radius: 8px;
+        font-size: 13px;
         background: transparent;
         cursor: pointer;
         display: flex;
@@ -151,7 +152,7 @@
         justify-content: center;
         gap: 6px;
         border: 1px solid;
-        font-weight: 500;
+        font-weight: 600;
         transition: background .15s, filter .15s;
         white-space: nowrap;
         text-decoration: none;
@@ -615,8 +616,8 @@
                     {% else %}<div class="no-poster">нет постера</div>{% endif %}
 
                     <div class="poster-icons">
-                        {% if c.new_count %}<span class="new-dot" title="Новые эпизоды: {{ c.new_count }}">{{
-                            c.new_count }}</span>{% endif %}
+                        {% if c.show_dot %}<span class="new-dot" title="Новые эпизоды: {{ c.new_count }}">{{ c.new_count
+                            }}</span>{% endif %}
                         <form method="post" action="/toggle-notify/{{ c.external_id }}?sort={{ sort }}">
                             <button class="icon-btn bell {{ '' if c.notify_enabled else 'off' }}" type="submit"
                                 title="{{ 'Выключить уведомления' if c.notify_enabled else 'Включить уведомления' }}">
@@ -646,7 +647,7 @@
                         <form method="post" action="/distribution/download/{{ c.external_id }}?sort={{ sort }}"
                             class="js-download-form" data-title="{{ c.title|e }}">
                             <button class="flip-btn btn-green" type="submit">
-                                ⬇ Скачать торрент{% if c.new_count %}<span class="count-badge">{{ c.new_count
+                                ⬇ Скачать торрент{% if c.show_badge %}<span class="count-badge">{{ c.new_count
                                     }}</span>{% endif %}
                             </button>
                         </form>
