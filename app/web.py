@@ -2,11 +2,11 @@ import asyncio
 import json
 import uuid
 import traceback
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 import httpx
-from fastapi import (APIRouter, Form, Request, Response, RedirectResponse,
-                     JSONResponse, BackgroundTasks, HTMLResponse)
+from fastapi import APIRouter, Form, Request, BackgroundTasks
+from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse, Response)
 
 from .core import (templates, db, get_setting, set_setting, get_refresh_hours,
                    refresh_period_label, get_telegram_settings, save_telegram_settings,
