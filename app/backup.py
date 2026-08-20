@@ -1,18 +1,22 @@
 import io
 import os
 import json
+import sqlite3
 import zipfile
+import hashlib
 import tempfile
 import traceback
-import hashlib
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import APIRouter, Form, File, UploadFile, Response, RedirectResponse, StreamingResponse, FileResponse
+from fastapi import APIRouter, Form, File, UploadFile
+from fastapi.responses import (Response, RedirectResponse, StreamingResponse,
+                               FileResponse)
 
-from .core import (db, scheduler, POSTERS_DIR, STATIC_DIR, get_proxy_url,
-                   SETTINGS_TABLES, CARD_TABLES, TORRENT_TABLES, BACKUP_VERSION, get_refresh_hours)
+from .core import (DB_PATH, POSTERS_DIR, STATIC_DIR, get_proxy_url,
+                   SETTINGS_TABLES, CARD_TABLES, TORRENT_TABLES, BACKUP_VERSION,
+                   get_refresh_hours, scheduler)
 from .notify import schedule_telegram_job
 from .jobs import (schedule_distribution_job, schedule_transmission_poll_job,
                    schedule_auto_clean_job)
@@ -26,8 +30,8 @@ def _build_backup_zip(a, b, c, d):
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".db")
     os.close(tmp_fd)
     try:
-        src = sqlite3_connect()
-        dst = sqlite3_connect(tmp_path)
+        src = sqlite3.connect(DB_PATH)
+        dst = sqlite3.connect(tmp_path)
         src.backup(dst)
         src.close()
         if not a:
@@ -39,7 +43,8 @@ def _build_backup_zip(a, b, c, d):
         if not d:
             for t in TORRENT_TABLES:
                 dst.execute(f"DROP TABLE IF EXISTS {t}")
-        dst.commit(); dst.close()
+        dst.commit()
+        dst.close()
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("meta.json", json.dumps({
@@ -58,16 +63,6 @@ def _build_backup_zip(a, b, c, d):
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
-
-
-def sqlite3_connect(path=None):
-    import sqlite3
-    return sqlite3.connect(path or DB_PATH_REF())
-
-
-def DB_PATH_REF():
-    from .core import DB_PATH
-    return DB_PATH
 
 
 @router_backup.post("/backup/create")
@@ -100,7 +95,7 @@ async def restore_backup(file: UploadFile = File(...)):
     scheduler.pause()
     try:
         try:
-            with open(os.path.join(os.path.dirname(DB_PATH_REF()), "auto-backup-latest.zip"), "wb") as f:
+            with open(os.path.join(os.path.dirname(DB_PATH), "auto-backup-latest.zip"), "wb") as f:
                 f.write(_build_backup_zip(True, True, True, True).read())
         except Exception as e:
             print(f"[backup] Auto-backup failed: {e}")
@@ -108,8 +103,7 @@ async def restore_backup(file: UploadFile = File(...)):
         os.close(tmp_fd)
         with zf.open("backup.db") as s, open(tmp_path, "wb") as d:
             d.write(s.read())
-        import sqlite3
-        conn = sqlite3.connect(DB_PATH_REF())
+        conn = sqlite3.connect(DB_PATH)
         try:
             conn.execute("PRAGMA foreign_keys=OFF")
             conn.execute("ATTACH DATABASE ? AS backup", (tmp_path,))
@@ -145,9 +139,11 @@ async def restore_backup(file: UploadFile = File(...)):
                     with zf.open(name) as s, open(target, "wb") as d:
                         d.write(s.read())
         try:
-            from .core import scheduler as sch
-            sch.reschedule_job("refresh", trigger="interval", hours=get_refresh_hours())
-            schedule_telegram_job(); schedule_distribution_job(); schedule_transmission_poll_job(); schedule_auto_clean_job()
+            scheduler.reschedule_job("refresh", trigger="interval", hours=get_refresh_hours())
+            schedule_telegram_job()
+            schedule_distribution_job()
+            schedule_transmission_poll_job()
+            schedule_auto_clean_job()
         except Exception as e:
             print(f"[backup] re-apply error: {e}")
     except Exception as e:
