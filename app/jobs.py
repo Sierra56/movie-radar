@@ -1,3 +1,4 @@
+import asyncio
 import json
 import statistics
 from datetime import date, datetime, timedelta
@@ -58,7 +59,8 @@ async def check_distributions_job():
         return
     now = datetime.now()
     checked = 0
-    for dist in rows:
+    for r in rows:
+        dist = dict(r)  # sqlite3.Row не имеет .get() — конвертируем в dict
         try:
             interval = effective_interval_hours(dist)
             due = True
@@ -72,16 +74,11 @@ async def check_distributions_job():
             ok, msg = await check_distribution_now(dist["title_external_id"])
             checked += 1
             print(f"[auto-check] {dist['title_external_id']}: {msg}")
-            await asyncio_sleep(10)
+            await asyncio.sleep(10)
         except Exception as e:
             print(f"[auto-check] error {dist['title_external_id']}: {e}")
     if checked:
         print(f"[auto-check] checked {checked}")
-
-
-async def asyncio_sleep(sec):
-    import asyncio
-    await asyncio.sleep(sec)
 
 
 def schedule_distribution_job():
