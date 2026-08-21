@@ -112,6 +112,10 @@ def ensure_schema():
             db(f"ALTER TABLE telegram_settings ADD COLUMN {col} INTEGER DEFAULT 1", write=True)
         except sqlite3.OperationalError:
             pass
+    try:
+        db("ALTER TABLE telegram_settings ADD COLUMN timezone TEXT DEFAULT 'Europe/Moscow'", write=True)
+    except sqlite3.OperationalError:
+        pass
 
     db("""CREATE TABLE IF NOT EXISTS updates_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT, title TEXT, field TEXT,
@@ -243,15 +247,17 @@ def get_telegram_settings():
 def save_telegram_settings(bot_token, chat_id, enabled, send_time, notify_days,
                            notify_date_changes, notify_new_cards, notify_new_seasons,
                            notify_new_episodes, notify_torrent_started=False,
-                           notify_torrent_completed=False, notify_season_completed=False):
+                           notify_torrent_completed=False, notify_season_completed=False,
+                           timezone="Europe/Moscow"):
     db("""UPDATE telegram_settings SET bot_token=?, chat_id=?, enabled=?, send_time=?, notify_days=?,
             notify_date_changes=?, notify_new_cards=?, notify_new_seasons=?, notify_new_episodes=?,
-            notify_torrent_started=?, notify_torrent_completed=?, notify_season_completed=? WHERE id=1""",
+            notify_torrent_started=?, notify_torrent_completed=?, notify_season_completed=?,
+            timezone=? WHERE id=1""",
        (bot_token, chat_id, 1 if enabled else 0, send_time, notify_days,
         1 if notify_date_changes else 0, 1 if notify_new_cards else 0,
         1 if notify_new_seasons else 0, 1 if notify_new_episodes else 0,
         1 if notify_torrent_started else 0, 1 if notify_torrent_completed else 0,
-        1 if notify_season_completed else 0), write=True)
+        1 if notify_season_completed else 0, timezone), write=True)
 
 
 def get_transmission_settings():

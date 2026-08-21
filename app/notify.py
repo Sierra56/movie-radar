@@ -1,11 +1,12 @@
 import json
 from datetime import date, timedelta
+from zoneinfo import ZoneInfo
 
 import httpx
 from apscheduler.triggers.cron import CronTrigger
 
 from .core import (db, get_proxy_url, get_telegram_settings, human_date, is_today,
-                   scheduler)
+                   scheduler, format_size)
 
 
 def was_notified_today(ntype, external_id, details=""):
@@ -147,7 +148,6 @@ async def notify_torrent_completed(title, torrent_name, size_bytes, force=False)
         return
     if not s or not s.get("bot_token") or not s.get("chat_id"):
         return
-    from .core import format_size
     lines = ["✅ <b>Скачивание завершено</b>", "", f"🎬 <b>{title}</b>", f"📦 {torrent_name}", f"📏 {format_size(size_bytes)}"]
     await send_telegram("\n".join(lines))
 
@@ -222,8 +222,14 @@ async def check_and_notify(force=False):
 def schedule_telegram_job():
     s = get_telegram_settings()
     st = s.get("send_time", "09:00") or "09:00"
+    tz_name = s.get("timezone") or "Europe/Moscow"
     try:
         h, m = map(int, st.split(":"))
     except (ValueError, AttributeError):
         h, m = 9, 0
-    scheduler.add_job(check_and_notify, CronTrigger(hour=h, minute=m), id="telegram_notify", replace_existing=True)
+    try:
+        tz_info = ZoneInfo(tz_name)
+    except Exception:
+        tz_info = ZoneInfo("Europe/Moscow")
+    scheduler.add_job(check_and_notify, CronTrigger(hour=h, minute=m, timezone=tz_info),
+                      id="telegram_notify", replace_existing=True)

@@ -434,11 +434,13 @@ async def save_telegram(bot_token: str = Form(""), chat_id: str = Form(""), enab
                         notify_date_changes: str = Form("off"), notify_new_cards: str = Form("off"),
                         notify_new_seasons: str = Form("off"), notify_new_episodes: str = Form("off"),
                         notify_torrent_started: str = Form("off"), notify_torrent_completed: str = Form("off"),
-                        notify_season_completed: str = Form("off")):
+                        notify_season_completed: str = Form("off"),
+                        timezone: str = Form("Europe/Moscow")):
     save_telegram_settings(bot_token.strip(), chat_id.strip(), enabled == "on", send_time, notify_days,
                            notify_date_changes == "on", notify_new_cards == "on", notify_new_seasons == "on",
                            notify_new_episodes == "on", notify_torrent_started == "on",
-                           notify_torrent_completed == "on", notify_season_completed == "on")
+                           notify_torrent_completed == "on", notify_season_completed == "on",
+                           timezone.strip() or "Europe/Moscow")
     schedule_telegram_job()
     return RedirectResponse("/settings?msg=telegram-saved", status_code=303)
 

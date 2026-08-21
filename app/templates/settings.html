@@ -251,48 +251,79 @@
 <div class="section">
     <h2>🔔 Telegram-уведомления</h2>
     <form method="post" action="/settings/telegram">
-        <div class="field"><label>Bot Token (от @BotFather)</label>
+        <div class="field">
+            <label>Bot Token (от @BotFather)</label>
             <input type="password" name="bot_token" value="{{ tg.get('bot_token', '') }}">
         </div>
-        <div class="field"><label>Chat ID</label>
+        <div class="field">
+            <label>Chat ID</label>
             <input type="text" name="chat_id" value="{{ tg.get('chat_id', '') }}">
         </div>
-        <div class="check-row"><input type="checkbox" name="enabled" id="enabled" {% if tg.get('enabled') %}checked{%
-                endif %}>
+        <div class="check-row">
+            <input type="checkbox" name="enabled" id="enabled" {% if tg.get('enabled') %}checked{% endif %}>
             <label for="enabled">Включить уведомления о релизах</label>
         </div>
-        <div class="check-row"><input type="checkbox" name="notify_date_changes" {% if tg.get('notify_date_changes', 1)
-                %}checked{% endif %}>
+        <div class="check-row">
+            <input type="checkbox" name="notify_date_changes" {% if tg.get('notify_date_changes', 1) %}checked{% endif
+                %}>
             <label>Уведомлять о переносе дат</label>
         </div>
-        <div class="check-row"><input type="checkbox" name="notify_new_cards" {% if tg.get('notify_new_cards', 1)
-                %}checked{% endif %}>
+        <div class="check-row">
+            <input type="checkbox" name="notify_new_cards" {% if tg.get('notify_new_cards', 1) %}checked{% endif %}>
             <label>Уведомлять о новых карточках</label>
         </div>
-        <div class="check-row"><input type="checkbox" name="notify_new_seasons" {% if tg.get('notify_new_seasons', 1)
-                %}checked{% endif %}>
+        <div class="check-row">
+            <input type="checkbox" name="notify_new_seasons" {% if tg.get('notify_new_seasons', 1) %}checked{% endif %}>
             <label>Уведомлять о новых сезонах</label>
         </div>
-        <div class="check-row"><input type="checkbox" name="notify_new_episodes" {% if tg.get('notify_new_episodes', 1)
-                %}checked{% endif %}>
+        <div class="check-row">
+            <input type="checkbox" name="notify_new_episodes" {% if tg.get('notify_new_episodes', 1) %}checked{% endif
+                %}>
             <label>Уведомлять о новых эпизодах</label>
         </div>
-        <div class="check-row"><input type="checkbox" name="notify_torrent_started" {% if
-                tg.get('notify_torrent_started', 1) %}checked{% endif %}>
+        <div class="check-row">
+            <input type="checkbox" name="notify_torrent_started" {% if tg.get('notify_torrent_started', 1) %}checked{%
+                endif %}>
             <label>📥 Уведомлять о начале скачивания торрента</label>
         </div>
-        <div class="check-row"><input type="checkbox" name="notify_torrent_completed" {% if
-                tg.get('notify_torrent_completed', 1) %}checked{% endif %}>
+        <div class="check-row">
+            <input type="checkbox" name="notify_torrent_completed" {% if tg.get('notify_torrent_completed', 1)
+                %}checked{% endif %}>
             <label>✅ Уведомлять о завершении скачивания торрента</label>
         </div>
-        <div class="check-row"><input type="checkbox" name="notify_season_completed" {% if
-                tg.get('notify_season_completed', 1) %}checked{% endif %}>
+        <div class="check-row">
+            <input type="checkbox" name="notify_season_completed" {% if tg.get('notify_season_completed', 1) %}checked{%
+                endif %}>
             <label>🏁 Уведомлять о завершении сезона</label>
         </div>
-        <div class="field"><label>Время отправки ежедневной рассылки</label>
-            <input type="time" name="send_time" value="{{ tg.get('send_time', '09:00') }}">
+        <div class="two-col">
+            <div class="field">
+                <label>Время отправки ежедневной рассылки</label>
+                <input type="time" name="send_time" value="{{ tg.get('send_time', '09:00') }}">
+            </div>
+            <div class="field">
+                <label>Часовой пояс</label>
+                <select name="timezone">
+                    {% for tz in [
+                    "Europe/Kaliningrad", "Europe/Moscow", "Europe/Samara",
+                    "Asia/Yekaterinburg", "Asia/Omsk", "Asia/Novosibirsk",
+                    "Asia/Krasnoyarsk", "Asia/Irkutsk", "Asia/Yakutsk",
+                    "Asia/Vladivostok", "Asia/Magadan", "Asia/Kamchatka",
+                    "Europe/Kyiv", "Europe/Minsk", "Asia/Almaty", "Asia/Tashkent",
+                    "Europe/London", "Europe/Berlin", "Europe/Paris",
+                    "America/New_York", "America/Chicago", "America/Los_Angeles",
+                    "Asia/Tokyo", "Asia/Shanghai", "Asia/Dubai",
+                    "Australia/Sydney", "Pacific/Auckland"
+                    ] %}
+                    <option value="{{ tz }}" {% if (tg.get('timezone') or 'Europe/Moscow' )==tz %}selected{% endif %}>{{
+                        tz }}</option>
+                    {% endfor %}
+                </select>
+                <p class="hint">Время рассылки считается в выбранном поясе.</p>
+            </div>
         </div>
-        <div class="field"><label>Уведомлять за сколько дней до релиза</label>
+        <div class="field">
+            <label>Уведомлять за сколько дней до релиза</label>
             <select name="notify_days">
                 <option value="0" {% if tg.get('notify_days')==0 %}selected{% endif %}>только в день релиза</option>
                 <option value="1" {% if tg.get('notify_days')==1 %}selected{% endif %}>за 1 день</option>
@@ -332,8 +363,9 @@
 <div class="section">
     <h2>📡 Transmission</h2>
     <form method="post" action="/settings/transmission">
-        <div class="check-row"><input type="checkbox" name="enabled" {% if trans.get('enabled') %}checked{% endif %}>
-            <label>Включить интеграцию с Transmission</label>
+        <div class="check-row">
+            <input type="checkbox" name="enabled" id="trans-enabled" {% if trans.get('enabled') %}checked{% endif %}>
+            <label for="trans-enabled">Включить интеграцию с Transmission</label>
         </div>
         <div class="two-col">
             <div class="field"><label>Хост</label><input type="text" name="host"
@@ -346,10 +378,12 @@
                     value="{{ trans.get('username', '') }}"></div>
             <div class="field"><label>Пароль</label><input type="password" name="password" placeholder="••••••••"></div>
         </div>
-        <div class="field"><label>Базовая директория для скачивания</label>
+        <div class="field">
+            <label>Базовая директория для скачивания</label>
             <input type="text" name="base_download_dir" value="{{ trans.get('base_download_dir', '') }}">
         </div>
-        <div class="field"><label>Путь сохранения по умолчанию</label>
+        <div class="field">
+            <label>Путь сохранения по умолчанию</label>
             <select name="default_download_behavior">
                 <option value="use_distribution_path" {% if
                     trans.get('default_download_behavior')=='use_distribution_path' %}selected{% endif %}>Путь из
@@ -358,7 +392,8 @@
                     endif %}>Всегда базовую директорию</option>
             </select>
         </div>
-        <div class="field"><label>Действие при добавлении торрента</label>
+        <div class="field">
+            <label>Действие при добавлении торрента</label>
             <select name="action_on_new">
                 <option value="download" {% if trans.get('action_on_new')=='download' %}selected{% endif %}>Скачивать
                     сразу</option>
@@ -368,50 +403,63 @@
                     уведомлять</option>
             </select>
         </div>
-        <div class="check-row"><input type="checkbox" name="auto_download_new_files" {% if
+        <div class="check-row">
+            <input type="checkbox" name="auto_download_new_files" id="auto-download" {% if
                 trans.get('auto_download_new_files') %}checked{% endif %}>
-            <label>Автоматически скачивать при обнаружении новых файлов</label>
+            <label for="auto-download">Автоматически скачивать при обнаружении новых файлов</label>
         </div>
 
         <h3>🤖 Автопроверка раздач</h3>
-        <div class="check-row"><input type="checkbox" name="auto_check_enabled" {% if trans.get('auto_check_enabled', 1)
-                %}checked{% endif %}>
-            <label>Включить автопроверку раздач</label>
+        <div class="check-row">
+            <input type="checkbox" name="auto_check_enabled" id="auto-check-enabled" {% if
+                trans.get('auto_check_enabled', 1) %}checked{% endif %}>
+            <label for="auto-check-enabled">Включить автопроверку раздач</label>
         </div>
-        <div class="field"><label>Тик автопроверки (минуты)</label>
+        <div class="field">
+            <label>Тик автопроверки (минуты)</label>
             <input type="number" name="auto_check_tick_minutes" value="{{ trans.get('auto_check_tick_minutes', 10) }}"
                 min="5" max="60">
+            <p class="hint">Как часто обходить раздачи и проверять подошедшие по сроку.</p>
         </div>
 
         <h3>📥 Опрос Transmission</h3>
-        <div class="field"><label>Интервал опроса Transmission (минуты)</label>
+        <div class="field">
+            <label>Интервал опроса Transmission (минуты)</label>
             <input type="number" name="transmission_poll_minutes"
                 value="{{ trans.get('transmission_poll_minutes', 3) }}" min="1" max="60">
+            <p class="hint">Как часто проверять статус загрузок для уведомлений о завершении.</p>
         </div>
 
         <h3>🧹 Автоочистка</h3>
-        <div class="check-row"><input type="checkbox" name="auto_clean_enabled" {% if trans.get('auto_clean_enabled')
-                %}checked{% endif %}>
-            <label>Включить автоочистку торрентов из Transmission</label>
+        <div class="check-row">
+            <input type="checkbox" name="auto_clean_enabled" id="auto-clean-enabled" {% if
+                trans.get('auto_clean_enabled') %}checked{% endif %}>
+            <label for="auto-clean-enabled">Включить автоочистку торрентов из Transmission</label>
         </div>
-        <div class="field"><label>Удалять завершённые через (дней)</label>
+        <div class="field">
+            <label>Удалять завершённые через (дней)</label>
             <input type="number" name="auto_clean_days" value="{{ trans.get('auto_clean_days', 30) }}" min="1"
                 max="365">
+            <p class="hint">Торренты, завершённые более N дней назад, удаляются вместе с файлами.</p>
         </div>
-        <div class="check-row"><input type="checkbox" name="auto_clean_on_watch" {% if trans.get('auto_clean_on_watch')
-                %}checked{% endif %}>
-            <label>Удалять эпизод после отметки «просмотрено»</label>
+        <div class="check-row">
+            <input type="checkbox" name="auto_clean_on_watch" id="auto-clean-watch" {% if
+                trans.get('auto_clean_on_watch') %}checked{% endif %}>
+            <label for="auto-clean-watch">Удалять эпизод после отметки «просмотрено»</label>
         </div>
 
-        <div class="check-row"><input type="checkbox" name="filter_recent_only" {% if trans.get('filter_recent_only', 1)
+        <div class="check-row">
+            <input type="checkbox" name="filter_recent_only" id="filter-recent" {% if trans.get('filter_recent_only', 1)
                 %}checked{% endif %}>
-            <label>Скачивать только свежие эпизоды (за последние 30 дней)</label>
+            <label for="filter-recent">Скачивать только свежие эпизоды (за последние 30 дней)</label>
         </div>
         <div class="two-col">
-            <div class="field"><label>Мин. размер файла (МБ)</label>
+            <div class="field">
+                <label>Мин. размер файла (МБ)</label>
                 <input type="number" name="min_file_size_mb" value="{{ trans.get('min_file_size_mb', 500) }}" min="1">
             </div>
-            <div class="field"><label>Интервал проверки по умолчанию (часов)</label>
+            <div class="field">
+                <label>Интервал проверки по умолчанию (часов)</label>
                 <input type="number" name="default_check_interval" value="{{ trans.get('default_check_interval', 6) }}"
                     min="1" max="168">
             </div>
@@ -431,17 +479,20 @@
     </div>
     <form method="post" action="/settings/tracker">
         <input type="hidden" name="tracker_name" value="rutracker">
-        <div class="check-row"><input type="checkbox" name="enabled" {% if tracker_rt and tracker_rt.get('enabled')
+        <div class="check-row">
+            <input type="checkbox" name="enabled" id="tracker-enabled" {% if tracker_rt and tracker_rt.get('enabled')
                 %}checked{% endif %}>
-            <label>Включить rutracker.org</label>
+            <label for="tracker-enabled">Включить rutracker.org</label>
             {% if tracker_rt_has_cookies %}<span class="cookies-loaded-badge">✅ Cookies загружены</span>{% endif %}
         </div>
         <h3>Способ 1: Ручной ввод cookies (рекомендуется)</h3>
-        <div class="field"><label>Cookies из браузера</label>
+        <div class="field">
+            <label>Cookies из браузера</label>
             <textarea name="cookies_manual" rows="4"
                 placeholder="bb_guid=...; bb_session=...; bb_ssl=1; cf_clearance=..."></textarea>
         </div>
-        <div class="field"><label>User-Agent вашего браузера (обязательно)</label>
+        <div class="field">
+            <label>User-Agent вашего браузера (обязательно)</label>
             <input type="text" name="user_agent" value="{{ tracker_rt.get('user_agent', '') if tracker_rt else '' }}">
         </div>
         <h3>Способ 2: Логин/пароль (fallback)</h3>
@@ -466,16 +517,19 @@
     <h2>🎬 Торрент-трекер: kinozal.me</h2>
     <form method="post" action="/settings/tracker">
         <input type="hidden" name="tracker_name" value="kinozal">
-        <div class="check-row"><input type="checkbox" name="enabled" {% if tracker_kz and tracker_kz.get('enabled')
+        <div class="check-row">
+            <input type="checkbox" name="enabled" id="kz-enabled" {% if tracker_kz and tracker_kz.get('enabled')
                 %}checked{% endif %}>
-            <label>Включить kinozal.me</label>
+            <label for="kz-enabled">Включить kinozal.me</label>
             {% if tracker_kz_has_cookies %}<span class="cookies-loaded-badge">✅ Cookies загружены</span>{% endif %}
         </div>
         <h3>Способ 1: Ручной ввод cookies (рекомендуется)</h3>
-        <div class="field"><label>Cookies из браузера</label>
+        <div class="field">
+            <label>Cookies из браузера</label>
             <textarea name="cookies_manual" rows="4" placeholder="uid=...; pass=...; ..."></textarea>
         </div>
-        <div class="field"><label>User-Agent вашего браузера (обязательно)</label>
+        <div class="field">
+            <label>User-Agent вашего браузера (обязательно)</label>
             <input type="text" name="user_agent" value="{{ tracker_kz.get('user_agent', '') if tracker_kz else '' }}">
         </div>
         <h3>Способ 2: Логин/пароль (fallback)</h3>
@@ -501,9 +555,10 @@
     <div class="info-box"><strong>ℹ️ rutor.info</strong> не требует авторизации — работает без cookies.</div>
     <form method="post" action="/settings/tracker">
         <input type="hidden" name="tracker_name" value="rutor">
-        <div class="check-row"><input type="checkbox" name="enabled" {% if tracker_ru and tracker_ru.get('enabled')
+        <div class="check-row">
+            <input type="checkbox" name="enabled" id="rutor-enabled" {% if tracker_ru and tracker_ru.get('enabled')
                 %}checked{% endif %}>
-            <label>Включить rutor.info</label>
+            <label for="rutor-enabled">Включить rutor.info</label>
         </div>
         <div class="btn-row"><button type="submit">Сохранить</button></div>
     </form>
@@ -523,7 +578,8 @@
     </form>
     <h3>Восстановление из бэкапа</h3>
     <form method="post" action="/backup/restore" enctype="multipart/form-data" onsubmit="return confirmRestore()">
-        <div class="field"><label>Файл бэкапа (.zip)</label>
+        <div class="field">
+            <label>Файл бэкапа (.zip)</label>
             <input type="file" name="file" accept=".zip" required>
             <p class="warning-text">⚠️ Текущие данные будут заменены. Создаётся автоснапшот.</p>
         </div>
