@@ -29,7 +29,7 @@ MONTHS_RU_SHORT = ["янв", "фев", "мар", "апр", "май", "июн",
 
 refresh_progress = {"running": False, "done": 0, "total": 0}
 
-BACKUP_VERSION = "1.0.1"
+BACKUP_VERSION = "1.0.1.0"
 SETTINGS_TABLES = ["settings", "telegram_settings"]
 CARD_TABLES = ["titles", "seasons", "episodes", "watched_episodes", "updates_log"]
 TORRENT_TABLES = ["tracker_credentials", "transmission_settings",
@@ -162,7 +162,9 @@ def ensure_schema():
                 "auto_download_new_files INTEGER DEFAULT 0", "auto_check_enabled INTEGER DEFAULT 1",
                 "auto_check_tick_minutes INTEGER DEFAULT 10", "transmission_poll_minutes INTEGER DEFAULT 3",
                 "auto_clean_enabled INTEGER DEFAULT 0", "auto_clean_days INTEGER DEFAULT 30",
-                "auto_clean_on_watch INTEGER DEFAULT 0"):
+                "auto_clean_on_watch INTEGER DEFAULT 0",
+                "client_type TEXT DEFAULT 'transmission'",
+                "rtorrent_url TEXT DEFAULT ''"):
         try:
             db(f"ALTER TABLE transmission_settings ADD COLUMN {col}", write=True)
         except sqlite3.OperationalError:

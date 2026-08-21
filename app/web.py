@@ -338,7 +338,7 @@ async def downloads_remove_all():
     try:
         client = build_transmission_client()
     except Exception as e:
-        print(f"[downloads] cannot connect to Transmission: {e}")
+        print(f"[downloads] cannot connect to client: {e}")
         client = None
     for r in rows:
         if client:
@@ -357,7 +357,7 @@ async def downloads_remove(history_id: int):
         try:
             build_transmission_client().remove_torrent(rows[0]["transmission_hash"], delete_data=False)
         except Exception as e:
-            print(f"[downloads] remove from transmission failed: {e}")
+            print(f"[downloads] remove from client failed: {e}")
         db("DELETE FROM download_history WHERE id=?", (history_id,), write=True)
     return RedirectResponse("/downloads?msg=download-removed", status_code=303)
 
@@ -380,15 +380,15 @@ async def settings_page(request: Request, msg: str | None = None):
         "message": {"refresh-saved": "Период обновления сохранён.", "telegram-saved": "Настройки Telegram сохранены.",
                     "proxy-saved": "Настройки прокси сохранены.", "proxy-ok": "Прокси работает!",
                     "theme-saved": "Тема сохранена.", "test-ok": "Тестовое сообщение отправлено!",
-                    "restore-ok": "Восстановление завершено.", "transmission-saved": "Настройки Transmission сохранены.",
-                    "transmission-test-ok": get_setting("last_trans_test") or "Transmission подключён.",
+                    "restore-ok": "Восстановление завершено.", "transmission-saved": "Настройки клиента сохранены.",
+                    "transmission-test-ok": get_setting("last_trans_test") or "Клиент подключён.",
                     "tracker-saved": "Настройки трекера сохранены.", "tracker-cookies-saved": "Cookies сохранены и зашифрованы.",
                     "tracker-test-ok": "Подключение к трекеру успешно!"}.get(msg),
         "error_message": {"proxy-fail": "Не удалось подключиться через прокси.", "proxy-not-set": "Прокси не настроен.",
                           "test-fail": "Не удалось отправить. Проверьте токен и chat_id.",
                           "backup-empty": "Выберите хотя бы один компонент.", "restore-invalid": "Неверный файл бэкапа.",
                           "restore-error": "Ошибка при восстановлении.",
-                          "transmission-test-fail": get_setting("last_trans_test") or "Не удалось подключиться к Transmission.",
+                          "transmission-test-fail": get_setting("last_trans_test") or "Не удалось подключиться к клиенту.",
                           "tracker-test-fail": "Не удалось войти на трекер.", "tracker-captcha": "Трекер требует капчу.",
                           "tracker-forbidden": "Rutracker заблокировал запрос (403).",
                           "tracker-cookies-invalid": "Cookies невалидны."}.get(msg)})
@@ -486,15 +486,19 @@ async def save_transmission(host: str = Form("localhost"), port: int = Form(9091
                             auto_download_new_files: str = Form("off"), auto_check_enabled: str = Form("off"),
                             auto_check_tick_minutes: int = Form(10), transmission_poll_minutes: int = Form(3),
                             auto_clean_enabled: str = Form("off"), auto_clean_days: int = Form(30),
-                            auto_clean_on_watch: str = Form("off")):
+                            auto_clean_on_watch: str = Form("off"),
+                            client_type: str = Form("transmission"), rtorrent_url: str = Form("")):
     if action_on_new not in ("download", "pause", "notify_only"):
         action_on_new = "download"
     if default_download_behavior not in ("use_distribution_path", "use_base_dir"):
         default_download_behavior = "use_distribution_path"
+    if client_type not in ("transmission", "rtorrent"):
+        client_type = "transmission"
     db("""UPDATE transmission_settings SET host=?, port=?, username=?, encrypted_password=?, enabled=?,
             base_download_dir=?, action_on_new=?, filter_recent_only=?, min_file_size_mb=?, default_check_interval=?,
             default_download_behavior=?, auto_download_new_files=?, auto_check_enabled=?, auto_check_tick_minutes=?,
-            transmission_poll_minutes=?, auto_clean_enabled=?, auto_clean_days=?, auto_clean_on_watch=?
+            transmission_poll_minutes=?, auto_clean_enabled=?, auto_clean_days=?, auto_clean_on_watch=?,
+            client_type=?, rtorrent_url=?
           WHERE id=1""",
        (host.strip(), port, username.strip(), encrypt_value(password.strip()), 1 if enabled == "on" else 0,
         base_download_dir.strip(), action_on_new, 1 if filter_recent_only == "on" else 0, max(1, min_file_size_mb),
@@ -502,7 +506,7 @@ async def save_transmission(host: str = Form("localhost"), port: int = Form(9091
         1 if auto_download_new_files == "on" else 0, 1 if auto_check_enabled == "on" else 0,
         max(5, min(60, auto_check_tick_minutes)), max(1, min(60, transmission_poll_minutes)),
         1 if auto_clean_enabled == "on" else 0, max(1, min(365, auto_clean_days)),
-        1 if auto_clean_on_watch == "on" else 0), write=True)
+        1 if auto_clean_on_watch == "on" else 0, client_type, rtorrent_url.strip()), write=True)
     schedule_distribution_job()
     schedule_transmission_poll_job()
     schedule_auto_clean_job()
@@ -512,7 +516,7 @@ async def save_transmission(host: str = Form("localhost"), port: int = Form(9091
 @router_settings.post("/settings/transmission/test")
 async def test_transmission():
     trans = get_transmission_settings()
-    if not trans or not trans.get("host"):
+    if not trans or not trans.get("enabled"):
         return RedirectResponse("/settings?msg=transmission-test-fail", status_code=303)
     try:
         ok, message = build_transmission_client().test_connection()
@@ -655,7 +659,7 @@ async def download_distribution(title_external_id: str, sort: str = "date"):
         return RedirectResponse(f"/?sort={sort}&msg=dist-download-fail", status_code=303)
     trans = get_transmission_settings()
     if not trans or not trans.get("enabled"):
-        set_setting("last_dist_download", "Transmission отключён в настройках")
+        set_setting("last_dist_download", "Клиент загрузок отключён в настройках")
         return RedirectResponse(f"/?sort={sort}&msg=dist-download-fail", status_code=303)
     creds = get_tracker_credentials(dist["tracker_name"])
     if not creds or not creds.get("enabled"):
