@@ -7,11 +7,17 @@ class DelugeError(Exception):
     pass
 
 
+LOGIN_METHODS = ["auth.login", "login"]
+VERSION_METHODS = ["web.get_version", "get_version", "core.get_version", "daemon.get_version"]
+
+
 class DelugeClient:
     """Клиент Deluge (Web JSON-RPC, http://host:8115/json)."""
 
     def __init__(self, url="http://localhost:8115", password=""):
-        self.url = (url or "http://localhost:8115").rstrip("/") + "/json"
+        self.url = (url or "http://localhost:8115").rstrip("/")
+        if not self.url.endswith("/json"):
+            self.url += "/json"
         self.password = password or ""
         self._sid = None
         self._id = 0
@@ -19,7 +25,7 @@ class DelugeClient:
     def _post(self, method, params):
         self._id += 1
         cookies = {"_session_id": self._sid} if self._sid else None
-        r = httpx.post(self.url, json={"method": method, "params": params, "id": self._id},
+        r = httpx.post(self.url, json={"method": method, "params": list(params), "id": self._id},
                        cookies=cookies, timeout=20)
         r.raise_for_status()
         sid = r.cookies.get("_session_id")
@@ -38,13 +44,35 @@ class DelugeClient:
                     return
             except Exception:
                 self._sid = None
-        ok = self._post("auth.login", [self.password])
-        if not ok:
-            raise DelugeError("Неверный пароль Deluge")
+        last = None
+        for m in LOGIN_METHODS:
+            try:
+                ok = self._post(m, [self.password])
+                if ok:
+                    return
+                raise DelugeError("Неверный пароль Deluge")
+            except DelugeError as e:
+                if "пароль" in str(e).lower() or "password" in str(e).lower():
+                    raise
+                last = e
+            except Exception as e:
+                last = e
+        raise DelugeError(f"Не удалось войти в Deluge ({self.url}): {last}. "
+                          f"Убедитесь, что это веб-интерфейс Deluge (порт 8115), а не демон (58846).")
 
     def _call(self, method, *params):
         self._auth()
         return self._post(method, list(params))
+
+    def _version(self):
+        for m in VERSION_METHODS:
+            try:
+                v = self._post(m, [])
+                if v:
+                    return v
+            except Exception:
+                continue
+        return None
 
     # ── общий интерфейс (как у TransmissionClient) ──
     def add_torrent(self, torrent, download_dir=None, paused=False):
@@ -85,7 +113,14 @@ class DelugeClient:
     def test_connection(self):
         try:
             self._auth()
-            v = self._post("web.get_version", [])
-            return True, f"Deluge {v}"
         except Exception as e:
             return False, str(e)
+        v = self._version()
+        if v:
+            return True, f"Deluge {v}"
+        try:
+            if self._post("auth.check_session", []):
+                return True, "Deluge (подключено)"
+        except Exception as e:
+            return False, str(e)
+        return True, "Deluge (подключено)"
