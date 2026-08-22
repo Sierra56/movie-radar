@@ -164,7 +164,8 @@ def ensure_schema():
                 "auto_clean_enabled INTEGER DEFAULT 0", "auto_clean_days INTEGER DEFAULT 30",
                 "auto_clean_on_watch INTEGER DEFAULT 0",
                 "client_type TEXT DEFAULT 'transmission'",
-                "rtorrent_url TEXT DEFAULT ''"):
+                "deluge_url TEXT DEFAULT ''",
+                "deluge_password TEXT DEFAULT ''"):
         try:
             db(f"ALTER TABLE transmission_settings ADD COLUMN {col}", write=True)
         except sqlite3.OperationalError:

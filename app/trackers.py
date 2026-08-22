@@ -49,13 +49,13 @@ def build_tracker_client(tracker_name: str = "rutracker", cookies=None) -> BaseT
 
 
 def build_transmission_client():
-    """Возвращает активный клиент загрузок: Transmission или rTorrent."""
+    """Возвращает активный клиент загрузок: Transmission или Deluge."""
     trans = get_transmission_settings() or {}
-    if trans.get("client_type") == "rtorrent":
-        from .rtorrent import RTorrentClient
-        return RTorrentClient(url=trans.get("rtorrent_url") or "http://localhost:8080/RPC2",
-                              username=trans.get("username", ""),
-                              password=decrypt_value(trans.get("encrypted_password", "")) if trans.get("encrypted_password") else "")
+    ct = trans.get("client_type") or "transmission"
+    if ct == "deluge":
+        from .deluge import DelugeClient
+        return DelugeClient(url=trans.get("deluge_url") or "http://localhost:8115",
+                            password=decrypt_value(trans.get("deluge_password", "")) if trans.get("deluge_password") else "")
     return TransmissionClient(host=trans.get("host", "localhost"), port=trans.get("port", 9091),
                               username=trans.get("username", ""),
                               password=decrypt_value(trans.get("encrypted_password", "")) if trans.get("encrypted_password") else "")

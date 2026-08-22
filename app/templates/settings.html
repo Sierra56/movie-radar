@@ -361,15 +361,18 @@
             <select name="client_type">
                 <option value="transmission" {% if (trans.get('client_type') or 'transmission' )=='transmission'
                     %}selected{% endif %}>Transmission</option>
-                <option value="rtorrent" {% if trans.get('client_type')=='rtorrent' %}selected{% endif %}>rTorrent
-                </option>
+                <option value="deluge" {% if trans.get('client_type')=='deluge' %}selected{% endif %}>Deluge</option>
             </select>
-            <p class="hint">rTorrent: укажите XML-RPC URL (http://host:port/RPC2) или scgi://host:port.</p>
+            <p class="hint">Deluge: Web JSON-RPC (порт 8115) + пароль веб-интерфейса.</p>
         </div>
-        <div class="field">
-            <label>rTorrent RPC URL</label>
-            <input type="text" name="rtorrent_url" value="{{ trans.get('rtorrent_url', '') }}"
-                placeholder="http://localhost:8080/RPC2">
+        <div class="two-col">
+            <div class="field"><label>Deluge URL</label>
+                <input type="text" name="deluge_url" value="{{ trans.get('deluge_url', '') }}"
+                    placeholder="http://localhost:8115">
+            </div>
+            <div class="field"><label>Пароль Deluge (web)</label>
+                <input type="password" name="deluge_password" placeholder="••••••••">
+            </div>
         </div>
         <div class="two-col">
             <div class="field"><label>Хост (Transmission)</label><input type="text" name="host"
@@ -378,9 +381,10 @@
                     value="{{ trans.get('port', 9091) }}"></div>
         </div>
         <div class="two-col">
-            <div class="field"><label>Логин</label><input type="text" name="username"
+            <div class="field"><label>Логин (Transmission)</label><input type="text" name="username"
                     value="{{ trans.get('username', '') }}"></div>
-            <div class="field"><label>Пароль</label><input type="password" name="password" placeholder="••••••••"></div>
+            <div class="field"><label>Пароль (Transmission)</label><input type="password" name="password"
+                    placeholder="••••••••"></div>
         </div>
         <div class="field"><label>Базовая директория для скачивания</label>
             <input type="text" name="base_download_dir" value="{{ trans.get('base_download_dir', '') }}">

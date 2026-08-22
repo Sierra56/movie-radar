@@ -100,7 +100,7 @@ async def index(request: Request, sort: str = "date", err: str | None = None, ms
     success_messages = {"refresh-started": "Обновление запущено в фоне.", "card-updated": "Карточка обновлена.",
                         "dist-added": "Раздача добавлена.", "dist-updated": "Раздача обновлена. Нажмите ⟳ после сохранения.",
                         "dist-removed": "Раздача удалена.", "dist-checked": get_setting("last_dist_check") or "Проверка выполнена.",
-                        "dist-downloaded": get_setting("last_dist_download") or "Торрент отправлен в Transmission.",
+                        "dist-downloaded": get_setting("last_dist_download") or "Торрент отправлен в клиент.",
                         "pattern-saved": "Настройки обучения сохранены.", "pattern-reset": "Обучение сброшено."}
     error_messages = {"dist-exists": "Раздача уже добавлена.", "dist-invalid-url": "Неверная ссылка на раздачу.",
                       "dist-check-fail": get_setting("last_dist_check") or "Ошибка проверки раздачи.",
@@ -320,7 +320,7 @@ async def downloads_page(request: Request, msg: str | None = None):
                  LEFT JOIN titles t ON d.title_external_id = t.external_id
                  ORDER BY h.sent_at DESC LIMIT 200""")
     messages = {"downloads-refreshed": "Статусы загрузок обновлены.",
-                "downloads-removed-all": "Все торренты удалены из Transmission, журнал очищен.",
+                "downloads-removed-all": "Все торренты удалены из клиента, журнал очищен.",
                 "download-removed": "Загрузка удалена."}
     return templates.TemplateResponse(request, "downloads.html",
                                       {"rows": [dict(r) for r in rows], "message": messages.get(msg)})
@@ -487,18 +487,19 @@ async def save_transmission(host: str = Form("localhost"), port: int = Form(9091
                             auto_check_tick_minutes: int = Form(10), transmission_poll_minutes: int = Form(3),
                             auto_clean_enabled: str = Form("off"), auto_clean_days: int = Form(30),
                             auto_clean_on_watch: str = Form("off"),
-                            client_type: str = Form("transmission"), rtorrent_url: str = Form("")):
+                            client_type: str = Form("transmission"),
+                            deluge_url: str = Form(""), deluge_password: str = Form("")):
     if action_on_new not in ("download", "pause", "notify_only"):
         action_on_new = "download"
     if default_download_behavior not in ("use_distribution_path", "use_base_dir"):
         default_download_behavior = "use_distribution_path"
-    if client_type not in ("transmission", "rtorrent"):
+    if client_type not in ("transmission", "deluge"):
         client_type = "transmission"
     db("""UPDATE transmission_settings SET host=?, port=?, username=?, encrypted_password=?, enabled=?,
             base_download_dir=?, action_on_new=?, filter_recent_only=?, min_file_size_mb=?, default_check_interval=?,
             default_download_behavior=?, auto_download_new_files=?, auto_check_enabled=?, auto_check_tick_minutes=?,
             transmission_poll_minutes=?, auto_clean_enabled=?, auto_clean_days=?, auto_clean_on_watch=?,
-            client_type=?, rtorrent_url=?
+            client_type=?, deluge_url=?, deluge_password=?
           WHERE id=1""",
        (host.strip(), port, username.strip(), encrypt_value(password.strip()), 1 if enabled == "on" else 0,
         base_download_dir.strip(), action_on_new, 1 if filter_recent_only == "on" else 0, max(1, min_file_size_mb),
@@ -506,7 +507,8 @@ async def save_transmission(host: str = Form("localhost"), port: int = Form(9091
         1 if auto_download_new_files == "on" else 0, 1 if auto_check_enabled == "on" else 0,
         max(5, min(60, auto_check_tick_minutes)), max(1, min(60, transmission_poll_minutes)),
         1 if auto_clean_enabled == "on" else 0, max(1, min(365, auto_clean_days)),
-        1 if auto_clean_on_watch == "on" else 0, client_type, rtorrent_url.strip()), write=True)
+        1 if auto_clean_on_watch == "on" else 0, client_type, deluge_url.strip(),
+        encrypt_value(deluge_password.strip())), write=True)
     schedule_distribution_job()
     schedule_transmission_poll_job()
     schedule_auto_clean_job()
