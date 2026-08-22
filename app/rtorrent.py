@@ -82,18 +82,14 @@ class RTorrentClient:
     """Клиент rTorrent (XML-RPC поверх HTTP или SCGI)."""
 
     def __init__(self, url="http://localhost:8080/RPC2", username="", password=""):
-        self.url = url or "http://localhost:8080/RPC2"
-        self._proxy = None
+        self.url = (url or "http://localhost:8080/RPC2").strip()
+        self.username = username or ""
+        self.password = password or ""
         self._scgi = None
         if self.url.startswith("scgi://"):
             hostport = self.url[len("scgi://"):].rstrip("/")
             host, _, port = hostport.partition(":")
             self._scgi = (host or "localhost", int(port or 5000))
-        else:
-            if username:
-                scheme, rest = self.url.split("://", 1)
-                self.url = f"{scheme}://{username}:{password}@{rest}"
-            self._proxy = xmlrpc.client.ServerProxy(self.url, allow_none=True)
 
     # ── транспорт ──
     def _scgi_request(self, body):
@@ -112,16 +108,38 @@ class RTorrentClient:
         _, _, bodyresp = resp.partition(b"\r\n\r\n")
         return bodyresp
 
+    def _http_request(self, body):
+        import httpx
+        auth = (self.username, self.password) if self.username else None
+        r = httpx.post(self.url, content=body, headers={"Content-Type": "text/xml"},
+                       timeout=20, auth=auth)
+        if r.status_code >= 400:
+            raise RTorrentError(f"HTTP {r.status_code}")
+        return r.content
+
+    def _request(self, body):
+        return self._scgi_request(body) if self._scgi else self._http_request(body)
+
+    def _parse(self, body):
+        stripped = body.lstrip()
+        is_xml = stripped.startswith(b"<?xml") or b"<methodResponse" in stripped[:64]
+        if not is_xml or stripped[:5].lower() == b"<html":
+            raise RTorrentError(
+                "Эндпоинт вернул не XML-RPC (похоже на веб-интерфейс). "
+                "Укажите RPC: http://host:port/RPC2, scgi://host:port "
+                "или http://user:pass@host/rutorrent/plugins/httprpc/action.php")
+        params, _ = xmlrpc.client.loads(body)
+        return params
+
     def _call(self, method, *args):
+        body = xmlrpc.client.dumps(args, methodname=method, allow_none=True)
         try:
-            if self._proxy is not None:
-                return getattr(self._proxy, method)(*args)
-            body = xmlrpc.client.dumps(args, methodname=method, allow_none=True)
-            resp = self._scgi_request(body)
-            params, _ = xmlrpc.client.loads(resp)
-            return params[0] if len(params) == 1 else params
+            params = self._parse(self._request(body))
+        except RTorrentError:
+            raise
         except Exception as e:
             raise RTorrentError(f"{method}: {e}")
+        return params[0] if len(params) == 1 else params
 
     # ── общий интерфейс (как у TransmissionClient) ──
     def add_torrent(self, torrent, download_dir=None, paused=False):
