@@ -101,6 +101,21 @@
         }
     }
 
+    /* Разделённые блоки клиентов */
+    .client-block {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin-bottom: 14px;
+        background: var(--bg-card);
+    }
+
+    .client-block h3 {
+        margin: 0 0 12px;
+        font-size: 15px;
+        color: var(--text);
+    }
+
     .log-table {
         width: 100%;
         border-collapse: collapse;
@@ -356,16 +371,39 @@
         <div class="check-row"><input type="checkbox" name="enabled" {% if trans.get('enabled') %}checked{% endif %}>
             <label>Включить интеграцию с клиентом загрузок</label>
         </div>
+
         <div class="field">
-            <label>Клиент загрузок</label>
-            <select name="client_type">
+            <label>Активный клиент</label>
+            <select name="client_type" id="client_type">
                 <option value="transmission" {% if (trans.get('client_type') or 'transmission' )=='transmission'
                     %}selected{% endif %}>Transmission</option>
                 <option value="deluge" {% if trans.get('client_type')=='deluge' %}selected{% endif %}>Deluge</option>
             </select>
-            <p class="hint">Deluge: Web JSON-RPC (порт 8115) + пароль веб-интерфейса.</p>
+            <p class="hint">Поля ниже показываются только для выбранного клиента.</p>
         </div>
-        <div class="two-col">
+
+        <!-- ── Transmission ── -->
+        <div id="block-transmission" class="client-block"
+            style="{% if trans.get('client_type') == 'deluge' %}display:none{% endif %}">
+            <h3>🟠 Transmission</h3>
+            <div class="two-col">
+                <div class="field"><label>Хост</label><input type="text" name="host"
+                        value="{{ trans.get('host', 'localhost') }}"></div>
+                <div class="field"><label>Порт</label><input type="number" name="port"
+                        value="{{ trans.get('port', 9091) }}"></div>
+            </div>
+            <div class="two-col">
+                <div class="field"><label>Логин</label><input type="text" name="username"
+                        value="{{ trans.get('username', '') }}"></div>
+                <div class="field"><label>Пароль</label><input type="password" name="password" placeholder="••••••••">
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Deluge ── -->
+        <div id="block-deluge" class="client-block"
+            style="{% if trans.get('client_type') != 'deluge' %}display:none{% endif %}">
+            <h3>🔵 Deluge</h3>
             <div class="field"><label>Deluge URL</label>
                 <input type="text" name="deluge_url" value="{{ trans.get('deluge_url', '') }}"
                     placeholder="http://localhost:8115">
@@ -374,18 +412,8 @@
                 <input type="password" name="deluge_password" placeholder="••••••••">
             </div>
         </div>
-        <div class="two-col">
-            <div class="field"><label>Хост (Transmission)</label><input type="text" name="host"
-                    value="{{ trans.get('host', 'localhost') }}"></div>
-            <div class="field"><label>Порт (Transmission)</label><input type="number" name="port"
-                    value="{{ trans.get('port', 9091) }}"></div>
-        </div>
-        <div class="two-col">
-            <div class="field"><label>Логин (Transmission)</label><input type="text" name="username"
-                    value="{{ trans.get('username', '') }}"></div>
-            <div class="field"><label>Пароль (Transmission)</label><input type="password" name="password"
-                    placeholder="••••••••"></div>
-        </div>
+
+        <!-- ── Общие параметры (для обоих клиентов) ── -->
         <div class="field"><label>Базовая директория для скачивания</label>
             <input type="text" name="base_download_dir" value="{{ trans.get('base_download_dir', '') }}">
         </div>
@@ -605,5 +633,20 @@
     function confirmRestore() {
         return confirm("ВНИМАНИЕ: Текущие данные будут заменены.\n\nПродолжить?");
     }
+
+    // Переключение блоков Transmission / Deluge
+    (function () {
+        const sel = document.getElementById('client_type');
+        if (!sel) return;
+        const bT = document.getElementById('block-transmission');
+        const bD = document.getElementById('block-deluge');
+        function sync() {
+            const isDeluge = sel.value === 'deluge';
+            bD.style.display = isDeluge ? '' : 'none';
+            bT.style.display = isDeluge ? 'none' : '';
+        }
+        sel.addEventListener('change', sync);
+        sync();
+    })();
 </script>
 {% endblock %}
