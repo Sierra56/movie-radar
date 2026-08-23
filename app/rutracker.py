@@ -1,7 +1,5 @@
 import re
-import json
-from urllib.parse import urljoin
-import httpx
+from curl_cffi import requests as cffi_requests
 
 
 class BaseTracker:
@@ -30,6 +28,9 @@ class RuTrackerForbiddenError(RuTrackerError):
 
 class RuTrackerClient(BaseTracker):
     BASE_URL = "https://rutracker.org/forum"
+    # Имитируем TLS-отпечаток Chrome 131 — обычно этого достаточно для Cloudflare.
+    # Если rutracker начнёт блокировать конкретную версию — поменять на "chrome120", "chrome124", "safari_ios" и т.п.
+    IMPERSONATE = "chrome"
 
     def __init__(self, username: str = "", password: str = "",
                  proxy: str | None = None, cookies: dict | None = None,
@@ -40,51 +41,58 @@ class RuTrackerClient(BaseTracker):
         self.cookies = cookies or {}
         self.user_agent = user_agent or (
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/130.0 Safari/537.36"
+            "(KHTML, like Gecko) Chrome/131.0 Safari/537.36"
         )
 
-    def _client_kwargs(self):
-        kw = {"timeout": 20, "follow_redirects": True}
+    def _request_kwargs(self):
+        """Общие параметры для всех запросов: имперсонейт + прокси + заголовки."""
+        kw = {
+            "impersonate": self.IMPERSONATE,
+            "timeout": 20,
+            "allow_redirects": True,
+        }
         if self.proxy:
-            kw["proxy"] = self.proxy
-        return kw
+            kw["proxies"] = {"http": self.proxy, "https": self.proxy}
+        # Кастомный UA поверх имперсонейта. Cloudflare обычно терпит подмену UA
+        # при совпадении TLS-отпечатка.
+        headers = {"User-Agent": self.user_agent}
+        return kw, headers
 
-    def _headers(self):
-        return {"User-Agent": self.user_agent}
+    def _session(self):
+        kw, headers = self._request_kwargs()
+        return cffi_requests.AsyncSession(headers=headers, **kw)
 
     async def validate_cookies(self, cookies: dict) -> tuple[bool, str]:
         try:
-            kw = self._client_kwargs()
-            async with httpx.AsyncClient(**kw) as client:
-                r = await client.get(f"{self.BASE_URL}/index.php",
-                                     cookies=cookies, headers=self._headers())
+            async with self._session() as client:
+                r = await client.get(f"{self.BASE_URL}/index.php", cookies=cookies)
                 if r.status_code == 200 and 'href="login.php"' not in r.text[:5000]:
                     return True, "cookies валидны"
-                return False, "cookies невалидны"
+                if r.status_code == 403:
+                    return False, "403 Forbidden (TLS/Cloudflare)"
+                return False, f"cookies невалидны (HTTP {r.status_code})"
         except Exception as e:
             return False, f"ошибка: {e}"
 
     async def login(self) -> dict:
         if not self.username or not self.password:
             raise RuTrackerAuthError("не указаны логин/пароль")
-        kw = self._client_kwargs()
-        async with httpx.AsyncClient(**kw) as client:
+        async with self._session() as client:
             r = await client.post(f"{self.BASE_URL}/login.php",
                                   data={"login_username": self.username,
                                         "login_password": self.password,
-                                        "login": "Вход"},
-                                  headers=self._headers())
+                                        "login": "Вход"})
             if "captcha" in r.text.lower():
                 raise RuTrackerCaptchaError("требуется капча")
             if 'href="login.php"' in r.text[:5000]:
                 raise RuTrackerAuthError("неверный логин/пароль")
+            # curl_cffi возвращает cookies как объект, совместимый с dict
             return dict(r.cookies)
 
     async def fetch_files(self, torrent_id: str, cookies: dict) -> list[dict]:
         url = f"{self.BASE_URL}/viewtopic.php?t={torrent_id}"
-        kw = self._client_kwargs()
-        async with httpx.AsyncClient(**kw) as client:
-            r = await client.get(url, cookies=cookies, headers=self._headers())
+        async with self._session() as client:
+            r = await client.get(url, cookies=cookies)
             if r.status_code == 403:
                 raise RuTrackerForbiddenError("403 Forbidden")
             if r.status_code != 200:
@@ -124,9 +132,8 @@ class RuTrackerClient(BaseTracker):
 
     async def download_torrent(self, torrent_id: str, cookies: dict) -> bytes:
         url = f"{self.BASE_URL}/dl.php?t={torrent_id}"
-        kw = self._client_kwargs()
-        async with httpx.AsyncClient(**kw) as client:
-            r = await client.get(url, cookies=cookies, headers=self._headers())
+        async with self._session() as client:
+            r = await client.get(url, cookies=cookies)
             if r.status_code != 200:
                 raise RuTrackerError(f"download HTTP {r.status_code}")
             return r.content

@@ -7,3 +7,4 @@ python-multipart
 cryptography
 beautifulsoup4
 transmission-rpc
+curl-cffi
