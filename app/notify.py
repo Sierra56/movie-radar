@@ -129,7 +129,7 @@ async def notify_new_episodes(show_title, new_eps, force=False):
     await send_telegram("\n".join(lines))
 
 
-async def notify_torrent_started(title, torrent_name, download_dir=None, force=False):
+async def notify_torrent_started(title, torrent_name, download_dir=None, new_files=None, force=False):
     s = get_telegram_settings()
     if not force and (not s or not s.get("enabled") or not s.get("notify_torrent_started")):
         return
@@ -138,17 +138,27 @@ async def notify_torrent_started(title, torrent_name, download_dir=None, force=F
     lines = ["📥 <b>Начато скачивание</b>", "", f"🎬 <b>{title}</b>", f"📦 {torrent_name}"]
     if download_dir:
         lines.append(f"📂 {download_dir}")
-    lines.append("⏳ Загрузка запущена в Transmission")
+    if new_files:
+        lines.append("")
+        lines.append("🆕 Новые файлы:")
+        for nf in new_files[:6]:
+            lines.append(f"• {nf}")
+    lines.append("⏳ Загрузка запущена")
     await send_telegram("\n".join(lines))
 
 
-async def notify_torrent_completed(title, torrent_name, size_bytes, force=False):
+async def notify_torrent_completed(title, torrent_name, size_bytes, new_files=None, force=False):
     s = get_telegram_settings()
     if not force and (not s or not s.get("enabled") or not s.get("notify_torrent_completed")):
         return
     if not s or not s.get("bot_token") or not s.get("chat_id"):
         return
     lines = ["✅ <b>Скачивание завершено</b>", "", f"🎬 <b>{title}</b>", f"📦 {torrent_name}", f"📏 {format_size(size_bytes)}"]
+    if new_files:
+        lines.append("")
+        lines.append("🆕 Новые файлы:")
+        for nf in new_files[:6]:
+            lines.append(f"• {nf}")
     await send_telegram("\n".join(lines))
 
 

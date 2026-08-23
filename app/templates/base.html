@@ -180,22 +180,30 @@
             border-color: var(--accent);
         }
 
-        .message {
-            background: var(--accent-bg);
-            color: var(--accent-text);
-            padding: 10px 14px;
-            border-radius: 8px;
-            margin-bottom: 16px;
-            font-size: 14px;
+        /* Всплывающие подсказки с крестиком */
+        .message,
+        .error {
+            position: relative;
+            padding-right: 40px;
         }
 
-        .error {
-            background: var(--warning-bg);
-            color: var(--warning-text);
-            padding: 10px 14px;
-            border-radius: 8px;
-            margin-bottom: 16px;
-            font-size: 14px;
+        .flash-close {
+            position: absolute;
+            top: 50%;
+            right: 10px;
+            transform: translateY(-50%);
+            background: none;
+            border: 0;
+            color: inherit;
+            font-size: 18px;
+            line-height: 1;
+            cursor: pointer;
+            opacity: .65;
+            padding: 4px 6px;
+        }
+
+        .flash-close:hover {
+            opacity: 1;
         }
 
         .empty {
@@ -257,6 +265,15 @@
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
         }
+        // Крестик на всплывающих подсказках
+        document.addEventListener('DOMContentLoaded', function () {
+            document.querySelectorAll('.message, .error').forEach(function (el) {
+                var b = document.createElement('button');
+                b.type = 'button'; b.className = 'flash-close'; b.innerHTML = '&times;'; b.title = 'Закрыть';
+                b.addEventListener('click', function () { el.remove(); });
+                el.appendChild(b);
+            });
+        });
     </script>
     {% block extra_js %}{% endblock %}
 </body>

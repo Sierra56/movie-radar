@@ -29,7 +29,7 @@ MONTHS_RU_SHORT = ["янв", "фев", "мар", "апр", "май", "июн",
 
 refresh_progress = {"running": False, "done": 0, "total": 0}
 
-BACKUP_VERSION = "1.0.1.0"
+BACKUP_VERSION = "1.1.0.0"
 SETTINGS_TABLES = ["settings", "telegram_settings"]
 CARD_TABLES = ["titles", "seasons", "episodes", "watched_episodes", "updates_log"]
 TORRENT_TABLES = ["tracker_credentials", "transmission_settings",
@@ -190,7 +190,8 @@ def ensure_schema():
             file_size INTEGER, transmission_hash TEXT, sent_at TEXT DEFAULT (datetime('now')),
             completed_at TEXT, episode_season INTEGER, episode_number INTEGER,
             FOREIGN KEY (distribution_id) REFERENCES distributions(id) ON DELETE CASCADE)""", write=True)
-    for col in ("completed_at TEXT", "episode_season INTEGER", "episode_number INTEGER"):
+    for col in ("completed_at TEXT", "episode_season INTEGER", "episode_number INTEGER",
+                "new_files_json TEXT DEFAULT '[]'"):
         try:
             db(f"ALTER TABLE download_history ADD COLUMN {col}", write=True)
         except sqlite3.OperationalError:
