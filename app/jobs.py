@@ -167,6 +167,6 @@ async def auto_clean_job():
                     print(f"[auto-clean] remove error: {e}")
 
 
-def schedule_auto_clean_jobs():
+def schedule_auto_clean_job():
     scheduler.add_job(auto_clean_job, "interval", hours=6,
                       id="auto_clean", replace_existing=True, max_instances=1, coalesce=True)
