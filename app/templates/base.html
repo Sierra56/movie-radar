@@ -309,17 +309,35 @@
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
         }
-        // Всплывающие подсказки: крестик + автоскрытие через 2 минуты
+
+        // Одноразовые flash-сообщения: убираем ?msg= / ?err= из URL сразу после загрузки.
+        // Тогда при F5 / повторном обновлении страницы параметра уже не будет,
+        // и сообщение не появится повторно.
+        (function () {
+            try {
+                var u = new URL(window.location.href);
+                var changed = false;
+                ['msg', 'err'].forEach(function (k) {
+                    if (u.searchParams.has(k)) { u.searchParams.delete(k); changed = true; }
+                });
+                if (changed) {
+                    var cleanUrl = u.pathname + (u.search || '') + (u.hash || '');
+                    window.history.replaceState({}, '', cleanUrl);
+                }
+            } catch (e) { /* URL API недоступен — пропускаем */ }
+        })();
+
+        // Крестик + автоскрытие через 2 минуты
         document.addEventListener('DOMContentLoaded', function () {
             document.querySelectorAll('.message, .error').forEach(function (el) {
                 var b = document.createElement('button');
                 b.type = 'button'; b.className = 'flash-close'; b.innerHTML = '&times;'; b.title = 'Закрыть';
                 b.addEventListener('click', function () { hideFlash(el); });
                 el.appendChild(b);
-                // Автоскрытие через 120 секунд
                 setTimeout(function () { hideFlash(el); }, 120000);
             });
             function hideFlash(el) {
+                if (el.classList.contains('flash-hide')) return;
                 el.classList.add('flash-hide');
                 setTimeout(function () { el.remove(); }, 400);
             }
