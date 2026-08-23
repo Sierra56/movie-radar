@@ -699,9 +699,9 @@ async def download_distribution(title_external_id: str, sort: str = "date"):
         ep_n = ep[1] if ep else None
         db("""INSERT INTO download_history
               (distribution_id, file_name, file_size, transmission_hash,
-               episode_season, episode_number, sent_at)
-              VALUES (?,?,?,?,?,?,datetime('now'))""",
-           (dist["id"], result["name"], result["size"], result["hash"], ep_s, ep_n), write=True)
+               episode_season, episode_number, new_files_json, sent_at)
+              VALUES (?,?,?,?,?,?,?,datetime('now'))""",
+           (dist["id"], result["name"], result["size"], result["hash"], ep_s, ep_n, "[]"), write=True)
         cr = db("SELECT title FROM titles WHERE external_id=?", (title_external_id,))
         await notify_torrent_started(cr[0]["title"] if cr else title_external_id, result["name"], dd)
         await maybe_notify_season_completed(title_external_id, result["name"])

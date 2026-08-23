@@ -92,7 +92,7 @@ async def check_transmission_job():
     trans = get_transmission_settings() or {}
     if not trans.get("enabled"):
         return
-    rows = db("""SELECT h.id, h.transmission_hash, h.file_name, t.title as card_title
+    rows = db("""SELECT h.id, h.transmission_hash, h.file_name, h.new_files_json, t.title as card_title
                  FROM download_history h
                  LEFT JOIN distributions d ON h.distribution_id = d.id
                  LEFT JOIN titles t ON d.title_external_id = t.external_id
@@ -113,7 +113,11 @@ async def check_transmission_job():
         if (st.get("progress") or 0) >= 100 or st.get("is_finished"):
             db("UPDATE download_history SET completed_at=datetime('now') WHERE id=?", (r["id"],), write=True)
             title = r["card_title"] or r["file_name"]
-            await notify_torrent_completed(title, r["file_name"], st.get("size") or 0)
+            try:
+                nf = json.loads(r["new_files_json"] or "[]")
+            except Exception:
+                nf = []
+            await notify_torrent_completed(title, r["file_name"], st.get("size") or 0, nf)
             print(f"[transmission-poll] completed: {r['file_name']}")
 
 
@@ -163,6 +167,6 @@ async def auto_clean_job():
                     print(f"[auto-clean] remove error: {e}")
 
 
-def schedule_auto_clean_job():
+def schedule_auto_clean_jobs():
     scheduler.add_job(auto_clean_job, "interval", hours=6,
                       id="auto_clean", replace_existing=True, max_instances=1, coalesce=True)

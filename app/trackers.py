@@ -153,4 +153,20 @@ async def check_distribution_now(title_external_id):
                 ep_s = ep[0] if ep else None
                 ep_n = ep[1] if ep else None
                 new_names = [n for n, _ in new_files]
-                db
+                db("""INSERT INTO download_history
+                      (distribution_id, file_name, file_size, transmission_hash,
+                       episode_season, episode_number, new_files_json, sent_at)
+                      VALUES (?,?,?,?,?,?,?,datetime('now'))""",
+                   (dist["id"], result["name"], result["size"], result["hash"], ep_s, ep_n,
+                    json.dumps(new_names, ensure_ascii=False)), write=True)
+                cr = db("SELECT title FROM titles WHERE external_id=?", (title_external_id,))
+                await notify_torrent_started(cr[0]["title"] if cr else title_external_id,
+                                             result["name"], dd, new_names)
+                await maybe_notify_season_completed(title_external_id, result["name"])
+            except Exception as e:
+                print(f"[dist-check] Auto-download failed: {e}")
+    if not old_hash:
+        return True, f"Первая проверка: найдено {len(files)} файлов, снапшот сохранён"
+    if new_count:
+        return True, f"Обнаружено новых файлов: {new_count}"
+    return True, "Изменений нет"
