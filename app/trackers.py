@@ -97,6 +97,15 @@ async def check_distribution_now(title_external_id):
     try:
         files = await client.fetch_files(dist["torrent_id"], cookies)
     except (RuTrackerForbiddenError, KinozalForbiddenError) as e:
+        print(f"[dist-check] 403 from {dist['tracker_name']} for {dist['title_external_id']}: {e} | "
+              f"cookies={sorted((cookies or {}).keys())} | ua={creds.get('user_agent', '')!r}")
+        # Повторная валидация, чтобы отличить «cookies протухли» от «блокировка по UA/IP»
+        valid, reason = False, str(e)
+        if cookies:
+            try:
+                valid, reason = await client.validate_cookies(cookies)
+            except Exception as ve:
+                valid, reason = False, str(ve)
         db("UPDATE distributions SET status='error', error_message=? WHERE id=?", (str(e), dist["id"]), write=True)
         if username and password:
             try:
@@ -107,7 +116,10 @@ async def check_distribution_now(title_external_id):
             except Exception as re_:
                 return False, f"Ошибка: {e} (повторная: {re_})"
         else:
-            return False, f"{e} Обновите cookies в настройках."
+            if cookies and not valid:
+                return False, f"Сохранённые cookies отклонены трекером ({reason}). Обновите cookies и User-Agent в настройках."
+            return False, (f"{e} Трекер блокирует запрос (Cloudflare/UA/IP). "
+                           f"Убедитесь, что User-Agent совпадает с браузером и запросы идут с того же IP/прокси.")
     except (RuTrackerError, RutorError, KinozalError) as e:
         db("UPDATE distributions SET status='error', error_message=? WHERE id=?", (str(e), dist["id"]), write=True)
         return False, str(e)
