@@ -3,6 +3,7 @@ import json
 import uuid
 import traceback
 from datetime import date, timedelta
+from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Form, Request, BackgroundTasks
@@ -139,7 +140,7 @@ async def add_local(title: str = Form(...), release_date: str | None = Form(None
     db("INSERT INTO titles (external_id, title, type, release_date, poster_url, genres, source, updated_at) VALUES (?,?,?,?,?,?,?,datetime('now'))",
        (local_id, title.strip(), None, release_date or None, None, "", "local"), write=True)
     await notify_new_card(title.strip(), release_date, "local", None)
-    return RedirectResponse("/new?msg=added-local", status_code=303)
+    return RedirectResponse("/?new=" + quote(local_id, safe=""), status_code=303)
 
 
 @router_pages.post("/add-select")
@@ -174,7 +175,7 @@ async def add_select(external_id: str = Form(...), source: str = Form("tmdb"), r
             except Exception as e:
                 print(f"[add-select] Error seasons: {e}")
     await notify_new_card(info["title"], rd, src.name, info["type"])
-    resp = RedirectResponse("/new?msg=added", status_code=303)
+    resp = RedirectResponse("/?new=" + quote(info["external_id"], safe=""), status_code=303)
     resp.set_cookie("source", src.name, max_age=60 * 60 * 24 * 365)
     return resp
 
@@ -465,9 +466,9 @@ async def telegram_test(test_type: str):
         await notify_new_episodes("Тест", [{"season_number": 1, "episode_number": 5, "name": "Эпизод",
                                              "release_date": today.isoformat()}], force=True)
     elif test_type == "torrent-started":
-        await notify_torrent_started("Тест", "Test.S01E01.mkv", "/media", force=True)
+        await notify_torrent_started("Тест", "Test.S01E01.mkv", "/media", ["Test.S01E01.mkv"], force=True)
     elif test_type == "torrent-completed":
-        await notify_torrent_completed("Тест", "Test.S01E01.mkv", 2 * 1024 ** 3, force=True)
+        await notify_torrent_completed("Тест", "Test.S01E01.mkv", 2 * 1024 ** 3, ["Test.S01E01.mkv"], force=True)
     elif test_type == "season-completed":
         await notify_season_completed("Тестовый сериал", 1, force=True)
     elif test_type == "daily":

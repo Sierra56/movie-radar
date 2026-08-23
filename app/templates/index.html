@@ -69,6 +69,23 @@
         border: 1px dashed var(--accent);
     }
 
+    /* Подсветка только что добавленной карточки */
+    .card-new {
+        animation: card-highlight 2s ease-in-out infinite;
+    }
+
+    @keyframes card-highlight {
+
+        0%,
+        100% {
+            box-shadow: 0 0 0 3px rgba(79, 140, 255, .4);
+        }
+
+        50% {
+            box-shadow: 0 0 0 6px rgba(79, 140, 255, .6), 0 0 20px rgba(79, 140, 255, .3);
+        }
+    }
+
     /* ── Флип-постер ── */
     .flip {
         perspective: 1000px;
@@ -139,7 +156,6 @@
         font-size: 11px;
     }
 
-    /* Кнопки на обороте — крупнее */
     .flip-btn {
         width: 100%;
         padding: 10px 8px;
@@ -738,7 +754,7 @@
                     <div class="field">
                         <label>Путь сохранения (опционально)</label>
                         <input type="text" name="download_path" id="dist-path" placeholder="/media/series/Название">
-                        <p class="hint">Оставьте пустым, чтобы использовать базовую директорию Transmission.</p>
+                        <p class="hint">Оставьте пустым, чтобы использовать базовую директорию клиента.</p>
                     </div>
                     <div class="field">
                         <label>Режим проверки</label>
@@ -791,6 +807,25 @@
 
 {% block extra_js %}
 <script>
+    // ── Подсветка только что добавленной карточки (?new=...) ──
+    (function () {
+        const url = new URL(window.location.href);
+        const newId = url.searchParams.get('new');
+        if (!newId) return;
+        url.searchParams.delete('new');
+        window.history.replaceState({}, '', url.toString());
+        document.querySelectorAll('.card').forEach(function (card) {
+            const flip = card.querySelector('.flip');
+            if (flip && flip.dataset.id === newId) {
+                card.classList.add('card-new');
+                // Подсветка гаснет при клике на постер
+                flip.addEventListener('click', function () {
+                    card.classList.remove('card-new');
+                }, { once: true });
+            }
+        });
+    })();
+
     const patternsData = {{ patterns_json | safe }};
     const CONF_RU = { low: 'низкая', medium: 'средняя', high: 'высокая' };
 
@@ -904,7 +939,7 @@
         const form = e.target.closest('.js-download-form');
         if (form) {
             const name = form.dataset.title || '';
-            if (!confirm(`Отправить раздачу «${name}» в Transmission?\n\nСкачивание начнётся сразу (согласно настройкам Transmission).`)) e.preventDefault();
+            if (!confirm(`Отправить раздачу «${name}» в клиент загрузок?\n\nСкачивание начнётся сразу (согласно настройкам).`)) e.preventDefault();
         }
     });
 </script>
