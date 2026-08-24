@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#12141a">
+    <meta name="theme-color" content="#060b0d">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="manifest" href="/manifest.json">
@@ -12,38 +12,45 @@
     <link rel="apple-touch-icon" href="/static/icon.svg">
     <title>{% block title %}Movie Radar{% endblock %}</title>
     <style>
+        /* ═══ Дизайн-система: Изумрудная аврора ═══ */
         :root,
         [data-theme="dark"] {
-            --bg: #12141a;
-            --bg-card: #1a1d26;
-            --bg-hover: #232734;
-            --bg-section: #1a1d26;
-            --text: #e8eaf0;
-            --text-muted: #9aa1b0;
-            --text-faint: #6b7280;
-            --text-dim: #565d6b;
-            --accent: #4f8cff;
-            --accent-bg: rgba(79, 140, 255, .15);
-            --accent-text: #8ab4ff;
-            --border: #2a2f3d;
-            --border-light: #3a4152;
-            --success: #3ddc84;
-            --warning-bg: rgba(245, 166, 35, .15);
-            --warning-text: #f5a623;
-            --error: #ff5c5c;
-            --delete-btn-bg: #a33;
-            --delete-btn-hover: #c44;
-            --refresh-btn-bg: #3a4152;
-            --refresh-btn-hover: #4a5162;
-            --no-poster-bg: #232734;
-            --no-poster-text: #6b7280;
-            --tag-bg: rgba(0, 0, 0, .6);
-            --progress-bg: #232734;
-            --code-bg: #232734;
+            --bg: #060b0d;
+            --bg-card: rgba(255, 255, 255, .05);
+            --bg-hover: rgba(255, 255, 255, .08);
+            --bg-section: rgba(255, 255, 255, .05);
+            --text: #e9fffa;
+            --text-muted: #8fb8ae;
+            --text-faint: #6b9489;
+            --text-dim: #5a7d73;
+            --accent: #2dd4bf;
+            --accent-bg: rgba(45, 212, 191, .12);
+            --accent-text: #2dd4bf;
+            --c1: #2dd4bf;
+            --c2: #34d399;
+            --c3: #7dd3fc;
+            --border: rgba(45, 212, 191, .15);
+            --border-light: rgba(143, 184, 174, .2);
+            --success: #6ee7b7;
+            --warning-bg: rgba(251, 191, 36, .12);
+            --warning-text: #fbbf24;
+            --error: #fda4af;
+            --delete-btn-bg: rgba(253, 164, 175, .15);
+            --delete-btn-hover: rgba(253, 164, 175, .25);
+            --refresh-btn-bg: rgba(255, 255, 255, .06);
+            --refresh-btn-hover: rgba(255, 255, 255, .1);
+            --no-poster-bg: rgba(255, 255, 255, .08);
+            --no-poster-text: #6b9489;
+            --tag-bg: rgba(255, 255, 255, .06);
+            --progress-bg: rgba(255, 255, 255, .09);
+            --code-bg: rgba(255, 255, 255, .08);
+            --radius: 18px;
+            --radius-sm: 13px;
+            --radius-xs: 9px;
         }
 
         [data-theme="light"] {
-            --bg: #f4f6fa;
+            --bg: #f7f8fa;
             --bg-card: #fff;
             --bg-hover: #e8ecf3;
             --bg-section: #fff;
@@ -51,13 +58,16 @@
             --text-muted: #565d6b;
             --text-faint: #8a91a0;
             --text-dim: #a0a7b5;
-            --accent: #2563eb;
-            --accent-bg: rgba(37, 99, 235, .12);
-            --accent-text: #2563eb;
+            --accent: #059669;
+            --accent-bg: rgba(5, 150, 105, .1);
+            --accent-text: #059669;
+            --c1: #059669;
+            --c2: #10b981;
+            --c3: #0891b2;
             --border: #dde2ea;
             --border-light: #c6cdd9;
             --success: #16a34a;
-            --warning-bg: rgba(217, 119, 6, .12);
+            --warning-bg: rgba(217, 119, 6, .1);
             --warning-text: #b45309;
             --error: #dc2626;
             --delete-btn-bg: #dc2626;
@@ -66,18 +76,26 @@
             --refresh-btn-hover: #c6cdd9;
             --no-poster-bg: #e8ecf3;
             --no-poster-text: #8a91a0;
-            --tag-bg: rgba(0, 0, 0, .5);
+            --tag-bg: rgba(0, 0, 0, .04);
             --progress-bg: #e8ecf3;
             --code-bg: #e8ecf3;
+            --radius: 18px;
+            --radius-sm: 13px;
+            --radius-xs: 9px;
         }
 
         * {
             box-sizing: border-box;
+            margin: 0;
+            padding: 0;
         }
 
         body {
-            margin: 0;
-            background: var(--bg);
+            background: linear-gradient(120deg, rgba(45, 212, 191, .13), transparent 45%),
+                linear-gradient(300deg, rgba(125, 211, 252, .11), transparent 45%),
+                radial-gradient(700px 380px at 65% 0%, rgba(52, 211, 153, .10), transparent),
+                radial-gradient(500px 300px at 15% 60%, rgba(125, 211, 252, .06), transparent),
+                var(--bg);
             color: var(--text);
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             display: flex;
@@ -88,6 +106,7 @@
             width: 200px;
             flex-shrink: 0;
             background: var(--bg-card);
+            backdrop-filter: blur(16px);
             border-right: 1px solid var(--border);
             padding: 16px 0;
             position: sticky;
@@ -98,8 +117,11 @@
         .sidebar .logo {
             padding: 0 16px 16px;
             font-size: 17px;
-            font-weight: 700;
-            color: var(--accent);
+            font-weight: 800;
+            background: linear-gradient(90deg, var(--c1), var(--c3), var(--c2));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
         }
 
         .sidebar nav {
@@ -112,6 +134,7 @@
             color: var(--text-muted);
             text-decoration: none;
             font-size: 14px;
+            transition: .15s;
         }
 
         .sidebar nav a:hover {
@@ -122,6 +145,7 @@
         .sidebar nav a.active {
             background: var(--accent-bg);
             color: var(--accent-text);
+            font-weight: 600;
         }
 
         .main {
@@ -133,6 +157,7 @@
         .page-title {
             font-size: 22px;
             margin: 0 0 16px;
+            font-weight: 700;
         }
 
         a {
@@ -141,24 +166,29 @@
 
         button {
             font-family: inherit;
+            cursor: pointer;
         }
 
-        button.secondary {
-            padding: 8px 14px;
-            border-radius: 8px;
+        button.secondary,
+        button.secondary.small {
+            padding: 9px 16px;
+            border-radius: var(--radius-sm);
             border: 1px solid var(--border-light);
             background: var(--bg-hover);
             color: var(--text);
             font-size: 13px;
-            cursor: pointer;
+            font-weight: 600;
+            transition: .15s;
+            backdrop-filter: blur(10px);
         }
 
         button.secondary:hover {
-            background: var(--border-light);
+            border-color: var(--c1);
+            background: rgba(255, 255, 255, .1);
         }
 
         button.secondary.small {
-            padding: 6px 10px;
+            padding: 7px 12px;
             font-size: 12px;
         }
 
@@ -168,39 +198,41 @@
             background: var(--bg-hover);
             color: var(--text);
             border: 1px solid var(--border-light);
-            border-radius: 8px;
-            padding: 8px 12px;
+            border-radius: var(--radius-sm);
+            padding: 10px 14px;
             font-size: 14px;
+            backdrop-filter: blur(10px);
+            transition: .15s;
         }
 
         input:focus,
         select:focus,
         textarea:focus {
             outline: none;
-            border-color: var(--accent);
+            border-color: var(--c1);
+            box-shadow: 0 0 0 3px rgba(45, 212, 191, .12);
         }
 
-        /* Всплывающие подсказки — яркий фон + анимация */
+        /* Flash-уведомления */
         .message,
         .error {
             position: relative;
             padding: 14px 48px 14px 16px;
-            border-radius: 10px;
+            border-radius: var(--radius);
             margin-bottom: 16px;
             font-size: 14px;
             animation: flash-in .4s ease-out;
+            backdrop-filter: blur(10px);
         }
 
         .message {
-            background: linear-gradient(135deg, rgba(61, 220, 132, .25), rgba(61, 220, 132, .15));
-            border-left: 4px solid var(--success);
-            box-shadow: 0 4px 12px rgba(61, 220, 132, .3);
+            background: rgba(110, 231, 183, .12);
+            border: 1px solid rgba(110, 231, 183, .4);
         }
 
         .error {
-            background: linear-gradient(135deg, rgba(255, 92, 92, .25), rgba(255, 92, 92, .15));
-            border-left: 4px solid var(--error);
-            box-shadow: 0 4px 12px rgba(255, 92, 92, .3);
+            background: rgba(253, 164, 175, .12);
+            border: 1px solid rgba(253, 164, 175, .4);
         }
 
         @keyframes flash-in {
@@ -309,10 +341,6 @@
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
         }
-
-        // Одноразовые flash-сообщения: убираем ?msg= / ?err= из URL сразу после загрузки.
-        // Тогда при F5 / повторном обновлении страницы параметра уже не будет,
-        // и сообщение не появится повторно.
         (function () {
             try {
                 var u = new URL(window.location.href);
@@ -324,10 +352,8 @@
                     var cleanUrl = u.pathname + (u.search || '') + (u.hash || '');
                     window.history.replaceState({}, '', cleanUrl);
                 }
-            } catch (e) { /* URL API недоступен — пропускаем */ }
+            } catch (e) { }
         })();
-
-        // Крестик + автоскрытие через 2 минуты
         document.addEventListener('DOMContentLoaded', function () {
             document.querySelectorAll('.message, .error').forEach(function (el) {
                 var b = document.createElement('button');

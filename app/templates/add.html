@@ -1,396 +1,239 @@
 {% extends "base.html" %}
-{% block title %}Добавить карточку{% endblock %}
+{% block title %}Добавить{% endblock %}
 
 {% block extra_css %}
 <style>
-    .search-row {
-        display: flex;
-        gap: 8px;
-        max-width: 640px;
-        margin-bottom: 12px;
-    }
-
-    .search-input-wrap {
-        position: relative;
-        flex: 1;
-    }
-
-    .search-input-wrap input {
-        width: 100%;
-        padding-right: 44px;
-    }
-
-    .search-icon {
-        position: absolute;
-        right: 6px;
-        top: 50%;
-        transform: translateY(-50%);
-        background: none;
-        border: none;
-        cursor: pointer;
-        padding: 6px;
-        font-size: 16px;
-        line-height: 1;
-        color: var(--text-muted);
-    }
-
-    .search-icon:hover {
-        color: var(--accent);
-    }
-
-    .search-row select {
-        width: 140px;
-    }
-
-    .search-status {
-        color: var(--text-muted);
-        margin: 12px 0;
-    }
-
-    /* Modal */
-    .modal-overlay {
-        display: none;
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0, 0, 0, .7);
-        z-index: 100;
-        align-items: center;
-        justify-content: center;
-        padding: 20px;
-    }
-
-    .modal-overlay.open {
-        display: flex;
-    }
-
-    .modal {
+    .add-panel {
         background: var(--bg-card);
-        border-radius: 12px;
+        backdrop-filter: blur(16px);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 22px;
         max-width: 640px;
-        width: 100%;
-        max-height: 85vh;
+    }
+
+    .field {
         display: flex;
         flex-direction: column;
-        box-shadow: 0 8px 40px rgba(0, 0, 0, .5);
+        margin-bottom: 14px;
     }
 
-    .modal-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 16px 20px;
-        border-bottom: 1px solid var(--border);
-    }
-
-    .modal-header h3 {
-        font-size: 17px;
-    }
-
-    .modal-close {
-        background: none;
-        border: none;
-        font-size: 22px;
-        color: var(--text-muted);
-        cursor: pointer;
-        padding: 4px 8px;
-        line-height: 1;
-    }
-
-    .modal-close:hover {
-        color: var(--error);
-    }
-
-    .modal-body {
-        padding: 16px 20px;
-        overflow-y: auto;
-    }
-
-    .modal-loading {
-        text-align: center;
-        color: var(--text-muted);
-        padding: 24px;
-    }
-
-    .result-item {
-        display: flex;
-        gap: 12px;
-        padding: 10px;
-        border-radius: 10px;
-        cursor: pointer;
-        border: 1px solid var(--border);
-        margin-bottom: 8px;
-        transition: border-color .15s, background .15s;
-    }
-
-    .result-item:hover {
-        border-color: var(--accent);
-        background: var(--bg-hover);
-    }
-
-    .result-item img,
-    .result-item .no-poster {
-        width: 56px;
-        height: 84px;
-        object-fit: cover;
-        border-radius: 6px;
-        flex-shrink: 0;
-    }
-
-    .result-item .no-poster {
-        background: var(--no-poster-bg);
-        color: var(--no-poster-text);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 10px;
-    }
-
-    .result-info {
-        flex: 1;
-        min-width: 0;
-    }
-
-    .result-title {
-        font-size: 14px;
-        font-weight: 500;
-        margin-bottom: 4px;
-    }
-
-    .result-meta {
-        font-size: 12px;
-        color: var(--text-muted);
-    }
-
-    .local-add {
-        background: var(--bg-card);
-        padding: 20px;
-        border-radius: 12px;
-        margin-top: 20px;
-        max-width: 640px;
-        display: none;
-    }
-
-    .local-add h3 {
-        font-size: 16px;
-        margin-bottom: 12px;
-    }
-
-    .local-add .field {
-        margin-bottom: 12px;
-    }
-
-    .local-add label {
-        display: block;
+    .field label {
         font-size: 13px;
         color: var(--text-muted);
-        margin-bottom: 4px;
-    }
-
-    .local-add input {
-        width: 100%;
-    }
-
-    .info-box {
-        background: var(--bg-card);
-        padding: 16px;
-        border-radius: 12px;
-        margin-top: 20px;
-        border-left: 3px solid var(--accent);
-        max-width: 640px;
-    }
-
-    .info-box h3 {
-        font-size: 15px;
         margin-bottom: 6px;
     }
 
-    .info-box p {
+    .field input,
+    .field select {
+        width: 100%;
+    }
+
+    .btn {
+        border: 0;
+        cursor: pointer;
+        border-radius: var(--radius-sm);
+        padding: 10px 18px;
         font-size: 13px;
+        font-weight: 700;
+        transition: .15s;
+    }
+
+    .btn.p {
+        background: linear-gradient(90deg, var(--c1), var(--c3));
+        color: #04151a;
+        box-shadow: 0 0 14px rgba(45, 212, 191, .3);
+    }
+
+    .btn.p:hover {
+        filter: brightness(1.1);
+    }
+
+    .btn.s {
+        background: var(--bg-hover);
+        color: var(--text);
+        border: 1px solid var(--border-light);
+    }
+
+    .btn.s:hover {
+        border-color: var(--c1);
+    }
+
+    .btn-row {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+    }
+
+    .divider {
+        border-top: 1px solid var(--border);
+        margin: 18px 0;
+    }
+
+    .results {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 12px;
+        margin-top: 18px;
+    }
+
+    .result-card {
+        background: var(--bg-card);
+        backdrop-filter: blur(16px);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+        cursor: pointer;
+        transition: .2s;
+    }
+
+    .result-card:hover {
+        transform: translateY(-3px);
+        border-color: var(--c1);
+        box-shadow: 0 0 20px rgba(45, 212, 191, .18);
+    }
+
+    .result-card img {
+        width: 100%;
+        aspect-ratio: 2/3;
+        object-fit: cover;
+        display: block;
+    }
+
+    .result-card .no-poster {
+        width: 100%;
+        aspect-ratio: 2/3;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(150deg, rgba(45, 212, 191, .17), rgba(125, 211, 252, .14));
+        color: var(--no-poster-text);
+        font-size: 11px;
+    }
+
+    .result-card .rc-info {
+        padding: 8px 10px;
+    }
+
+    .result-card .rc-title {
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.3;
+    }
+
+    .result-card .rc-meta {
+        font-size: 11px;
+        color: var(--text-faint);
+        margin-top: 2px;
+    }
+
+    #search-status {
         color: var(--text-muted);
+        font-size: 13px;
+        margin-top: 12px;
     }
 </style>
 {% endblock %}
 
 {% block content %}
-<h1 class="page-title">➕ Добавить карточку</h1>
+<h1 class="page-title">➕ Добавить</h1>
 
 {% if message %}<p class="message">{{ message }}</p>{% endif %}
 {% if error_message %}<p class="error">{{ error_message }}</p>{% endif %}
 
-<div class="search-row">
-    <div class="search-input-wrap">
-        <input type="text" id="search-title" placeholder="Название фильма или сериала" autofocus>
-        <button class="search-icon" onclick="doSearch()" title="Поиск в OMDB/TMDB">🔍</button>
-    </div>
-    <select id="search-source">
-        {% for s in sources %}
-        <option value="{{ s }}" {% if s==default_source %}selected{% endif %}>
-            {% if s == 'omdb' %}OMDb{% else %}TMDB{% endif %}
-        </option>
-        {% endfor %}
-    </select>
-</div>
+<div class="add-panel">
+    <form id="search-form">
+        <div class="field">
+            <label>Название фильма или сериала</label>
+            <input type="text" id="q" name="q" placeholder="Например: Основание" autocomplete="off" required>
+        </div>
+        <div class="field">
+            <label>Источник</label>
+            <select id="source" name="source">
+                {% for s in sources %}
+                <option value="{{ s }}" {% if s==default_source %}selected{% endif %}>{{ s|upper }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="btn-row">
+            <button type="submit" class="btn p">🔍 Найти</button>
+            <button type="button" class="btn s"
+                onclick="document.getElementById('manual-form').style.display='block'; this.style.display='none';">✍️
+                Ввести вручную</button>
+        </div>
+    </form>
 
-<div class="local-add" id="local-add">
-    <h3>Добавить локально (без поиска в API)</h3>
-    <form method="post" action="/add">
+    <form id="manual-form" method="post" action="/add" style="display:none; margin-top:16px;">
+        <div class="divider"></div>
         <div class="field">
             <label>Название</label>
-            <input type="text" name="title" id="local-title" required>
+            <input type="text" name="title" required>
         </div>
         <div class="field">
-            <label>Дата релиза (если известна)</label>
+            <label>Дата релиза (опционально)</label>
             <input type="date" name="release_date">
         </div>
-        <button type="submit">Добавить локально</button>
+        <div class="btn-row"><button type="submit" class="btn p">Добавить локально</button></div>
     </form>
+
+    <div id="search-status"></div>
+    <div class="results" id="results"></div>
 </div>
 
-<div class="info-box">
-    <h3>💡 Как это работает</h3>
-    <p>Введите название и нажмите 🔍 (или Enter). Откроется окно с найденными результатами —
-        кликните на нужный, и карточка добавится с постером, жанрами и датой. Если ничего не
-        найдено, можно добавить карточку локально.</p>
-</div>
-
-<!-- Модальное окно результатов поиска -->
-<div class="modal-overlay" id="search-modal">
-    <div class="modal">
-        <div class="modal-header">
-            <h3>Выберите результат</h3>
-            <button class="modal-close" onclick="closeModal()" title="Закрыть">×</button>
-        </div>
-        <div class="modal-body" id="modal-results">
-            <p class="modal-loading">Идёт поиск...</p>
-        </div>
-    </div>
-</div>
+<form id="add-form" method="post" action="/add-select" style="display:none;">
+    <input type="hidden" name="external_id" id="add-id">
+    <input type="hidden" name="source" id="add-source">
+</form>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
+    const searchForm = document.getElementById('search-form');
+    const results = document.getElementById('results');
+    const status = document.getElementById('search-status');
+    const addForm = document.getElementById('add-form');
 
-    function openModal() {
-        document.getElementById('search-modal').classList.add('open');
-    }
-
-    function closeModal() {
-        document.getElementById('search-modal').classList.remove('open');
-    }
-
-    // Закрытие модалки по клику на фон
-    document.getElementById('search-modal').addEventListener('click', function (e) {
-        if (e.target === this) closeModal();
-    });
-
-    // Закрытие по Escape
-    document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') closeModal();
-    });
-
-    async function doSearch() {
-        const q = document.getElementById('search-title').value.trim();
-        const source = document.getElementById('search-source').value;
-        const resultsDiv = document.getElementById('modal-results');
-        const localAdd = document.getElementById('local-add');
+    searchForm.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const q = document.getElementById('q').value.trim();
+        const source = document.getElementById('source').value;
         if (!q) return;
-
-        localAdd.style.display = 'none';
-        resultsDiv.innerHTML = '<p class="modal-loading">Идёт поиск...</p>';
-        openModal();
-
-        const formData = new FormData();
-        formData.append('query', q);
-        formData.append('source', source);
-
+        status.textContent = 'Поиск...';
+        results.innerHTML = '';
         try {
-            const r = await fetch('/search', { method: 'POST', body: formData });
-            const data = await r.json();
-            renderResults(data.candidates, q);
-        } catch (e) {
-            resultsDiv.innerHTML = '<p class="modal-loading">Ошибка поиска. Попробуйте ещё раз.</p>';
-            setTimeout(() => {
-                closeModal();
-                showLocalAdd(q);
-            }, 1500);
-        }
-    }
-
-    function showLocalAdd(title) {
-        const localAdd = document.getElementById('local-add');
-        localAdd.style.display = 'block';
-        document.getElementById('local-title').value = title;
-    }
-
-    function renderResults(candidates, query) {
-        const resultsDiv = document.getElementById('modal-results');
-        if (!candidates || !candidates.length) {
-            resultsDiv.innerHTML = '<p class="modal-loading">Ничего не найдено.</p>';
-            setTimeout(() => {
-                closeModal();
-                showLocalAdd(query);
-            }, 1200);
-            return;
-        }
-        resultsDiv.innerHTML = '';
-        candidates.forEach(c => {
-            const item = document.createElement('div');
-            item.className = 'result-item';
-            item.onclick = () => selectCandidate(c.external_id, c.source);
-
-            const img = c.poster_url
-                ? `<img src="${c.poster_url}" alt="">`
-                : '<div class="no-poster">нет</div>';
-            const year = c.year ? ` · ${c.year}` : '';
-            const icon = c.type === 'series' ? '📺' : '🎬';
-            const typeLabel = c.type === 'series' ? 'Сериал' : 'Фильм';
-
-            item.innerHTML = `
-      ${img}
-      <div class="result-info">
-        <div class="result-title">${icon} ${escapeHtml(c.title)}</div>
-        <div class="result-meta">${typeLabel}${year}</div>
-      </div>
-    `;
-            resultsDiv.appendChild(item);
-        });
-    }
-
-    function selectCandidate(external_id, source) {
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = '/add-select';
-
-        const idInput = document.createElement('input');
-        idInput.type = 'hidden';
-        idInput.name = 'external_id';
-        idInput.value = external_id;
-        form.appendChild(idInput);
-
-        const srcInput = document.createElement('input');
-        srcInput.type = 'hidden';
-        srcInput.name = 'source';
-        srcInput.value = source;
-        form.appendChild(srcInput);
-
-        document.body.appendChild(form);
-        form.submit();
-    }
-
-    // Enter в поле запускает поиск
-    document.getElementById('search-title').addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            doSearch();
+            const fd = new FormData();
+            fd.append('query', q);
+            fd.append('source', source);
+            const r = await fetch('/search', { method: 'POST', body: fd });
+            const d = await r.json();
+            const list = d.candidates || [];
+            if (!list.length) { status.textContent = 'Ничего не найдено.'; return; }
+            status.textContent = `Найдено: ${list.length}`;
+            list.forEach(c => {
+                const card = document.createElement('div');
+                card.className = 'result-card';
+                card.innerHTML = `
+        ${c.poster_url ? `<img src="${c.poster_url}" alt="">` : `<div class="no-poster">нет постера</div>`}
+        <div class="rc-info">
+          <div class="rc-title">${escapeHtml(c.title)}</div>
+          <div class="rc-meta">${c.year || ''} ${c.type === 'series' ? '· Сериал' : c.type === 'movie' ? '· Фильм' : ''}</div>
+        </div>`;
+                card.addEventListener('click', () => selectCard(c, source));
+                results.appendChild(card);
+            });
+        } catch (err) {
+            status.textContent = 'Ошибка поиска.';
         }
     });
+
+    function selectCard(c, source) {
+        document.getElementById('add-id').value = c.external_id;
+        document.getElementById('add-source').value = source;
+        addForm.submit();
+    }
+
+    function escapeHtml(s) {
+        return (s || '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+    }
 </script>
 {% endblock %}

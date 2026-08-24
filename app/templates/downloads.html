@@ -3,97 +3,130 @@
 
 {% block extra_css %}
 <style>
-    .dl-actions {
+    .actions {
         display: flex;
         gap: 8px;
-        margin-bottom: 14px;
         flex-wrap: wrap;
+        margin-bottom: 16px;
     }
 
-    .dl-actions button {
-        padding: 8px 14px;
-        border-radius: 8px;
-        border: 1px solid var(--border-light);
+    .btn {
+        border: 0;
+        cursor: pointer;
+        border-radius: var(--radius-sm);
+        padding: 9px 16px;
+        font-size: 13px;
+        font-weight: 600;
+        transition: .15s;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .btn.p {
+        background: linear-gradient(90deg, var(--c1), var(--c3));
+        color: #04151a;
+        box-shadow: 0 0 14px rgba(45, 212, 191, .3);
+    }
+
+    .btn.p:hover {
+        filter: brightness(1.1);
+    }
+
+    .btn.s {
         background: var(--bg-hover);
         color: var(--text);
-        font-size: 13px;
-        cursor: pointer;
+        border: 1px solid var(--border-light);
     }
 
-    .dl-actions button:hover {
-        background: var(--border-light);
+    .btn.s:hover {
+        border-color: var(--c1);
     }
 
-    .dl-table {
+    .btn.d {
+        background: transparent;
+        color: var(--error);
+        border: 1px solid rgba(253, 164, 175, .4);
+    }
+
+    .btn.d:hover {
+        background: rgba(253, 164, 175, .1);
+    }
+
+    .table-wrap {
+        background: var(--bg-card);
+        backdrop-filter: blur(16px);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+    }
+
+    table {
         width: 100%;
         border-collapse: collapse;
         font-size: 14px;
     }
 
-    .dl-table th,
-    .dl-table td {
-        padding: 10px 12px;
+    th,
+    td {
+        padding: 12px 14px;
         text-align: left;
         border-bottom: 1px solid var(--border);
-        vertical-align: top;
     }
 
-    .dl-table th {
+    th {
         color: var(--text-muted);
+        font-weight: 600;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+    }
+
+    tr:last-child td {
+        border-bottom: 0;
+    }
+
+    tr:hover td {
+        background: var(--bg-hover);
+    }
+
+    .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 12px;
         font-weight: 600;
     }
 
-    .dl-name {
-        color: var(--text);
-        word-break: break-all;
+    .status-pill .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: currentColor;
     }
 
-    .dl-card {
-        color: var(--accent);
-        font-size: 13px;
-        display: block;
-        margin-top: 2px;
+    .status-pill.done {
+        background: rgba(110, 231, 183, .15);
+        color: var(--success);
     }
 
-    .dl-status {
-        display: inline-block;
-        padding: 2px 10px;
-        border-radius: 999px;
-        font-size: 12px;
-        white-space: nowrap;
+    .status-pill.loading {
+        background: var(--warning-bg);
+        color: var(--warning-text);
     }
 
-    .dl-status.done {
-        background: var(--success);
-        color: #fff;
-    }
-
-    .dl-status.pending {
-        background: var(--accent-bg);
-        color: var(--accent-text);
-    }
-
-    .dl-muted {
-        color: var(--text-faint);
-        font-size: 12px;
-    }
-
-    .dl-remove {
-        background: var(--delete-btn-bg);
-        color: #fff;
-        border: 0;
-        border-radius: 6px;
-        padding: 4px 8px;
-        cursor: pointer;
-    }
-
-    .dl-remove:hover {
-        background: var(--delete-btn-hover);
+    .status-pill.err {
+        background: rgba(253, 164, 175, .15);
+        color: var(--error);
     }
 
     .empty {
         color: var(--text-muted);
-        margin-top: 16px;
+        padding: 20px;
+        text-align: center;
     }
 </style>
 {% endblock %}
@@ -103,55 +136,55 @@
 
 {% if message %}<p class="message">{{ message }}</p>{% endif %}
 
-<div class="dl-actions">
-    <form method="post" action="/downloads/refresh">
-        <button type="submit">🔄 Обновить все</button>
+<div class="actions">
+    <form method="post" action="/downloads/refresh"><button class="btn s" type="submit">🔄 Обновить статусы</button>
     </form>
     <form method="post" action="/downloads/remove-all"
-        onsubmit="return confirm('Удалить ВСЕ торренты из Transmission и очистить журнал?\n\nСкачанные файлы останутся на диске.')">
-        <button type="submit">🗑 Удалить все</button>
+        onsubmit="return confirm('Удалить все торренты из клиента и очистить журнал?')">
+        <button class="btn d" type="submit">🗑 Удалить все</button>
     </form>
 </div>
 
-{% if rows %}
-<table class="dl-table">
-    <thead>
-        <tr>
-            <th>Файл</th>
-            <th>Размер</th>
-            <th>Отправлен</th>
-            <th>Статус</th>
-            <th></th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for r in rows %}
-        <tr>
-            <td>
-                <span class="dl-name">{{ r.file_name }}</span>
-                {% if r.card_title %}<span class="dl-card">🎬 {{ r.card_title }}</span>{% endif %}
-            </td>
-            <td class="dl-muted">{{ format_size(r.file_size) }}</td>
-            <td class="dl-muted">{{ r.sent_at }}</td>
-            <td>
-                {% if r.completed_at %}
-                <span class="dl-status done">✅ завершено</span>
-                <span class="dl-muted">{{ r.completed_at }}</span>
-                {% else %}
-                <span class="dl-status pending">⏳ качается</span>
-                {% endif %}
-            </td>
-            <td>
-                <form method="post" action="/downloads/remove/{{ r.id }}"
-                    onsubmit="return confirm('Удалить торрент из Transmission и журнал?')">
-                    <button class="dl-remove" type="submit" title="Удалить из Transmission">🗑</button>
-                </form>
-            </td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-{% else %}
-<p class="empty">Журнал загрузок пуст. Отправьте торрент в Transmission кнопкой ⬇ на карточке.</p>
-{% endif %}
+<div class="table-wrap">
+    {% if rows %}
+    <table>
+        <thead>
+            <tr>
+                <th>Название</th>
+                <th>Размер</th>
+                <th>Эпизод</th>
+                <th>Статус</th>
+                <th>Отправлено</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr>
+                <td>{{ r.card_title or r.file_name }}</td>
+                <td>{{ format_size(r.file_size) }}</td>
+                <td>{% if r.episode_season %}S{{ r.episode_season }}E{{ r.episode_number }}{% else %}—{% endif %}</td>
+                <td>
+                    {% if r.completed_at %}
+                    <span class="status-pill done"><span class="dot"></span>Завершено</span>
+                    {% elif r.dist_status == 'error' %}
+                    <span class="status-pill err"><span class="dot"></span>Ошибка</span>
+                    {% else %}
+                    <span class="status-pill loading"><span class="dot"></span>Загружается</span>
+                    {% endif %}
+                </td>
+                <td>{{ r.sent_at }}</td>
+                <td>
+                    <form method="post" action="/downloads/remove/{{ r.id }}" style="display:inline;">
+                        <button class="btn d" type="submit" title="Удалить">🗑</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty">Загрузок пока нет.</p>
+    {% endif %}
+</div>
 {% endblock %}

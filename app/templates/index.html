@@ -13,17 +13,20 @@
 
     .actions a {
         padding: 10px 18px;
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         text-decoration: none;
         background: var(--bg-hover);
         color: var(--text);
         font-size: 14px;
         border: 1px solid var(--border-light);
         display: inline-block;
+        backdrop-filter: blur(10px);
+        transition: .15s;
     }
 
     .actions a:hover {
-        background: var(--border-light);
+        border-color: var(--c1);
+        background: rgba(255, 255, 255, .1);
     }
 
     .toolbar {
@@ -41,12 +44,19 @@
         color: var(--text-muted);
         font-size: 14px;
         border: 1px solid var(--border);
+        backdrop-filter: blur(10px);
+        transition: .15s;
     }
 
     .toolbar a.active {
-        background: var(--accent);
-        color: #fff;
-        border-color: var(--accent);
+        background: linear-gradient(90deg, var(--c1), var(--c3));
+        color: #04151a;
+        border-color: transparent;
+        font-weight: 600;
+    }
+
+    .toolbar a:hover:not(.active) {
+        border-color: var(--c1);
     }
 
     .grid {
@@ -59,17 +69,25 @@
     .card {
         position: relative;
         background: var(--bg-card);
-        border-radius: 12px;
+        backdrop-filter: blur(16px);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
         overflow: hidden;
         display: flex;
         flex-direction: column;
+        transition: .22s;
+    }
+
+    .card:hover {
+        transform: translateY(-4px);
+        border-color: var(--c1);
+        box-shadow: 0 0 30px rgba(45, 212, 191, .20), 0 0 10px rgba(125, 211, 252, .12);
     }
 
     .card.local {
         border: 1px dashed var(--accent);
     }
 
-    /* Подсветка только что добавленной карточки */
     .card-new {
         animation: card-highlight 2s ease-in-out infinite;
     }
@@ -78,11 +96,11 @@
 
         0%,
         100% {
-            box-shadow: 0 0 0 3px rgba(79, 140, 255, .4);
+            box-shadow: 0 0 0 3px rgba(45, 212, 191, .4);
         }
 
         50% {
-            box-shadow: 0 0 0 6px rgba(79, 140, 255, .6), 0 0 20px rgba(79, 140, 255, .3);
+            box-shadow: 0 0 0 6px rgba(45, 212, 191, .6), 0 0 20px rgba(45, 212, 191, .3);
         }
     }
 
@@ -127,17 +145,19 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        background: var(--no-poster-bg);
+        background: linear-gradient(150deg, rgba(45, 212, 191, .17), rgba(125, 211, 252, .14), rgba(52, 211, 153, .11));
         color: var(--no-poster-text);
     }
 
     .flip-back {
         transform: rotateY(180deg);
-        background: var(--bg-hover);
+        background: rgba(255, 255, 255, .08);
+        backdrop-filter: blur(20px);
         display: flex;
         flex-direction: column;
         gap: 8px;
         padding: 10px;
+        border: 1px solid var(--border-light);
     }
 
     .flip-actions {
@@ -159,7 +179,7 @@
     .flip-btn {
         width: 100%;
         padding: 10px 8px;
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         font-size: 13px;
         background: transparent;
         cursor: pointer;
@@ -172,11 +192,12 @@
         transition: background .15s, filter .15s;
         white-space: nowrap;
         text-decoration: none;
+        backdrop-filter: blur(10px);
     }
 
     .flip-btn:hover {
         filter: brightness(1.25);
-        background: rgba(255, 255, 255, .06);
+        background: rgba(255, 255, 255, .08);
     }
 
     .flip-btn:disabled {
@@ -185,13 +206,13 @@
     }
 
     .btn-blue {
-        border-color: #4f8cff;
-        color: #4f8cff;
+        border-color: var(--c3);
+        color: var(--c3);
     }
 
     .btn-red {
-        border-color: #ff5c5c;
-        color: #ff5c5c;
+        border-color: var(--error);
+        color: var(--error);
     }
 
     .btn-orange {
@@ -200,8 +221,8 @@
     }
 
     .btn-green {
-        border-color: #3ddc84;
-        color: #3ddc84;
+        border-color: var(--success);
+        color: var(--success);
     }
 
     .btn-purple {
@@ -220,7 +241,6 @@
         display: inline-block;
     }
 
-    /* Оверлеи лицевой стороны */
     .poster-icons {
         position: absolute;
         top: 6px;
@@ -244,6 +264,7 @@
         align-items: center;
         justify-content: center;
         transition: background .15s;
+        backdrop-filter: blur(8px);
     }
 
     .icon-btn:hover {
@@ -273,7 +294,7 @@
     .poster-badge {
         position: absolute;
         padding: 3px 8px;
-        border-radius: 6px;
+        border-radius: 8px;
         font-size: 11px;
         font-weight: 600;
         z-index: 2;
@@ -282,15 +303,15 @@
     .poster-badge.next {
         left: 6px;
         bottom: 6px;
-        background: rgba(79, 140, 255, .92);
-        color: #fff;
+        background: rgba(45, 212, 191, .95);
+        color: #04231f;
     }
 
     .poster-badge.soon {
         left: 6px;
         bottom: 6px;
-        background: rgba(79, 140, 255, .92);
-        color: #fff;
+        background: rgba(45, 212, 191, .95);
+        color: #04231f;
     }
 
     .poster-badge.out {
@@ -303,8 +324,8 @@
     .poster-badge.airing {
         right: 6px;
         bottom: 6px;
-        background: rgba(61, 220, 132, .92);
-        color: #10131a;
+        background: rgba(110, 231, 183, .95);
+        color: #072b1a;
     }
 
     .poster-badge.finished {
@@ -314,7 +335,6 @@
         color: #9aa1b0;
     }
 
-    /* ── Инфо-блок ── */
     .info {
         padding: 12px 12px 8px;
         flex: 1 1 auto;
@@ -325,6 +345,7 @@
         line-height: 1.4;
         margin: 0 0 6px;
         min-height: 2.8em;
+        font-weight: 600;
     }
 
     .year {
@@ -344,9 +365,10 @@
     .tag {
         padding: 2px 8px;
         border-radius: 999px;
-        background: var(--bg-hover);
+        background: var(--tag-bg);
         color: var(--text-muted);
         font-size: 11px;
+        border: 1px solid var(--border-light);
     }
 
     .seasons-link {
@@ -372,13 +394,13 @@
         flex: 1;
         height: 4px;
         border-radius: 2px;
-        background: var(--bg-hover);
+        background: var(--progress-bg);
         overflow: hidden;
     }
 
     .watch-fill {
         height: 100%;
-        background: var(--success);
+        background: linear-gradient(90deg, var(--c1), var(--c3));
     }
 
     .watch-text {
@@ -402,7 +424,9 @@
         display: none;
         margin-bottom: 16px;
         background: var(--bg-card);
-        border-radius: 8px;
+        backdrop-filter: blur(16px);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
         padding: 12px;
     }
 
@@ -414,7 +438,7 @@
     }
 
     #progress-wrap .bar-fill {
-        background: var(--accent);
+        background: linear-gradient(90deg, var(--c1), var(--c3));
         height: 100%;
         width: 0;
         transition: width .5s;
@@ -426,7 +450,6 @@
         margin-top: 6px;
     }
 
-    /* ── Модалка ── */
     .modal-overlay {
         display: none;
         position: fixed;
@@ -435,6 +458,7 @@
         right: 0;
         bottom: 0;
         background: rgba(0, 0, 0, .7);
+        backdrop-filter: blur(8px);
         z-index: 100;
         align-items: center;
         justify-content: center;
@@ -447,7 +471,9 @@
 
     .modal {
         background: var(--bg-card);
-        border-radius: 12px;
+        backdrop-filter: blur(20px);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
         max-width: 560px;
         width: 100%;
         max-height: 85vh;
@@ -464,6 +490,7 @@
 
     .modal-header h3 {
         font-size: 17px;
+        font-weight: 700;
     }
 
     .modal-close {
@@ -495,12 +522,18 @@
         color: var(--text-muted);
         font-size: 13px;
         cursor: pointer;
+        transition: .15s;
     }
 
     .mtab.active {
-        background: var(--accent);
-        border-color: var(--accent);
-        color: #fff;
+        background: linear-gradient(90deg, var(--c1), var(--c3));
+        border-color: transparent;
+        color: #04151a;
+        font-weight: 600;
+    }
+
+    .mtab:hover:not(.active) {
+        border-color: var(--c1);
     }
 
     .modal-body {
@@ -575,7 +608,7 @@
     .learn-btn {
         flex: 1;
         padding: 10px 12px;
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         border: 1px solid var(--accent);
         background: var(--accent-bg);
         color: var(--accent-text);
@@ -585,8 +618,8 @@
     }
 
     .learn-btn:hover {
-        background: var(--accent);
-        color: #fff;
+        background: linear-gradient(90deg, var(--c1), var(--c3));
+        color: #04151a;
     }
 </style>
 {% endblock %}
@@ -807,7 +840,6 @@
 
 {% block extra_js %}
 <script>
-    // ── Подсветка только что добавленной карточки (?new=...) ──
     (function () {
         const url = new URL(window.location.href);
         const newId = url.searchParams.get('new');
@@ -818,7 +850,6 @@
             const flip = card.querySelector('.flip');
             if (flip && flip.dataset.id === newId) {
                 card.classList.add('card-new');
-                // Подсветка гаснет при клике на постер
                 flip.addEventListener('click', function () {
                     card.classList.remove('card-new');
                 }, { once: true });
