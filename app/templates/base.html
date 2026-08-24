@@ -44,7 +44,6 @@
             --tag-bg: rgba(255, 255, 255, .06);
             --progress-bg: rgba(255, 255, 255, .09);
             --code-bg: rgba(255, 255, 255, .08);
-            --opt-bg: #0d1417;
             --radius: 18px;
             --radius-sm: 13px;
             --radius-xs: 9px;
@@ -80,7 +79,6 @@
             --tag-bg: rgba(0, 0, 0, .04);
             --progress-bg: #e8ecf3;
             --code-bg: #e8ecf3;
-            --opt-bg: #ffffff;
             --radius: 18px;
             --radius-sm: 13px;
             --radius-xs: 9px;
@@ -215,15 +213,6 @@
             box-shadow: 0 0 0 3px rgba(45, 212, 191, .12);
         }
 
-        select {
-            background-color: var(--bg-hover);
-        }
-
-        select option {
-            background-color: var(--opt-bg);
-            color: var(--text);
-        }
-
         /* Flash-уведомления */
         .message,
         .error {
@@ -352,7 +341,6 @@
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
         }
-        // Одноразовые подсказки: убираем ?msg= / ?err= из URL после загрузки
         (function () {
             try {
                 var u = new URL(window.location.href);
@@ -366,7 +354,6 @@
                 }
             } catch (e) { }
         })();
-        // Крестик + автоскрытие через 2 минуты
         document.addEventListener('DOMContentLoaded', function () {
             document.querySelectorAll('.message, .error').forEach(function (el) {
                 var b = document.createElement('button');
