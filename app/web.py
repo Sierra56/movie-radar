@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Form, Request, BackgroundTasks
-from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse, Response)
+from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse)
 
 from .core import (templates, db, get_setting, set_setting, get_refresh_hours,
                    refresh_period_label, get_telegram_settings, save_telegram_settings,
@@ -19,7 +19,7 @@ from .sources import SOURCES, ensure_proxied, download_card_poster
 from .catalog import (get_season_count, get_next_season, get_next_episode_date,
                       get_show_progress, get_season_progress, get_watched_set,
                       toggle_watched, toggle_season_watched, refresh_catalog, refresh_single,
-                      build_ics, get_pattern, save_seasons, save_episodes,
+                      get_pattern, save_seasons, save_episodes,
                       update_next_episode_air_date, ensure_pattern, recompute_pattern,
                       maybe_notify_season_completed)
 from .notify import (notify_new_card, check_and_notify, notify_date_changes,
@@ -143,21 +143,8 @@ async def add_local(title: str = Form(...), release_date: str | None = Form(None
     return RedirectResponse("/?new=" + quote(local_id, safe=""), status_code=303)
 
 
-@router_pages.post("/add-select")
-async def add_select(external_id: str = Form(...), source: str = Form("tmdb"), release_date: str | None = Form(None)):
-    src = SOURCES.get(source)
-    if not src:
-        return RedirectResponse("/new?msg=search-fail", status_code=303)
-    try:
-        info = await src.fetch(external_id)
-    except Exception as e:
-        print(f"[add-select] Error: {e}")
-        info = None
-    if not info:
-        return RedirectResponse("/new?msg=search-fail", status_code=303)
-    rd = info["release_date"] or release_date or None
-    db("INSERT OR REPLACE INTO titles (external_id, title, type, release_date, poster_url, genres, source, updated_at, tmdb_status) VALUES (?,?,?,?,?,?,?,datetime('now'),?)",
-       (info["external_id"], info["title"], info["type"], rd, await download_card_poster(info), info["genres"], src.name, info.get("status")), write=True)
+async def _load_seasons_background(info: dict, src):
+    """Догружает сезоны и эпизоды в фоне, чтобы пользователь не ждал."""
     if info["type"] == "series" and src.name == "tmdb":
         tmdb_id = parse_tmdb_id(info["external_id"])
         if tmdb_id is not None:
@@ -172,8 +159,30 @@ async def add_select(external_id: str = Form(...), source: str = Form("tmdb"), r
                     except Exception:
                         pass
                 update_next_episode_air_date(info["external_id"])
+                print(f"[add-select bg] Seasons loaded for {info['external_id']}")
             except Exception as e:
-                print(f"[add-select] Error seasons: {e}")
+                print(f"[add-select bg] Error seasons: {e}")
+
+
+@router_pages.post("/add-select")
+async def add_select(external_id: str = Form(...), source: str = Form("tmdb"),
+                     release_date: str | None = Form(None), background: BackgroundTasks = None):
+    src = SOURCES.get(source)
+    if not src:
+        return RedirectResponse("/new?msg=search-fail", status_code=303)
+    try:
+        info = await src.fetch(external_id)
+    except Exception as e:
+        print(f"[add-select] Error: {e}")
+        info = None
+    if not info:
+        return RedirectResponse("/new?msg=search-fail", status_code=303)
+    rd = info["release_date"] or release_date or None
+    db("INSERT OR REPLACE INTO titles (external_id, title, type, release_date, poster_url, genres, source, updated_at, tmdb_status) VALUES (?,?,?,?,?,?,?,datetime('now'),?)",
+       (info["external_id"], info["title"], info["type"], rd, await download_card_poster(info), info["genres"], src.name, info.get("status")), write=True)
+    # Тяжёлая подгрузка сезонов/эпизодов уходит в фон — редирект сразу
+    if background is not None:
+        background.add_task(_load_seasons_background, info, src)
     await notify_new_card(info["title"], rd, src.name, info["type"])
     resp = RedirectResponse("/?new=" + quote(info["external_id"], safe=""), status_code=303)
     resp.set_cookie("source", src.name, max_age=60 * 60 * 24 * 365)
@@ -195,13 +204,6 @@ async def refresh_status():
 async def refresh_card(external_id: str, sort: str = "date"):
     await refresh_single(external_id)
     return RedirectResponse(f"/?sort={sort}&msg=card-updated", status_code=303)
-
-
-@router_pages.get("/export.ics")
-async def export_ics():
-    return Response(content=build_ics([dict(r) for r in db("SELECT * FROM titles")]),
-                    media_type="text/calendar; charset=utf-8",
-                    headers={"Content-Disposition": "attachment; filename=movie-radar.ics"})
 
 
 @router_pages.post("/delete/{external_id}")

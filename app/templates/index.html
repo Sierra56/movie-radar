@@ -11,24 +11,6 @@
         margin-bottom: 16px;
     }
 
-    .actions a {
-        padding: 10px 18px;
-        border-radius: var(--radius-sm);
-        text-decoration: none;
-        background: var(--bg-hover);
-        color: var(--text);
-        font-size: 14px;
-        border: 1px solid var(--border-light);
-        display: inline-block;
-        backdrop-filter: blur(10px);
-        transition: .15s;
-    }
-
-    .actions a:hover {
-        border-color: var(--c1);
-        background: rgba(255, 255, 255, .1);
-    }
-
     .toolbar {
         display: flex;
         gap: 6px;
@@ -104,7 +86,6 @@
         }
     }
 
-    /* ── Флип-постер ── */
     .flip {
         perspective: 1000px;
         width: 100%;
@@ -640,11 +621,10 @@
 
 <div class="actions">
     <form method="post" action="/refresh"><button class="secondary" type="submit">🔄 Обновить все даты</button></form>
-    <form method="post" action="/notify-all/on?sort={{ sort }}"><button class="secondary small" type="submit">🔔 Все
+    <form method="post" action="/notify-all/on?sort={{ sort }}"><button class="secondary" type="submit">🔔 Все
             вкл</button></form>
-    <form method="post" action="/notify-all/off?sort={{ sort }}"><button class="secondary small" type="submit">🔕 Все
+    <form method="post" action="/notify-all/off?sort={{ sort }}"><button class="secondary" type="submit">🔕 Все
             выкл</button></form>
-    <a href="/export.ics">📅 Скачать .ics</a>
 </div>
 
 <div class="toolbar">
