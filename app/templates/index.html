@@ -11,21 +11,6 @@
         margin-bottom: 16px;
     }
 
-    .actions a {
-        padding: 10px 18px;
-        border-radius: 8px;
-        text-decoration: none;
-        background: var(--bg-hover);
-        color: var(--text);
-        font-size: 14px;
-        border: 1px solid var(--border-light);
-        display: inline-block;
-    }
-
-    .actions a:hover {
-        background: var(--border-light);
-    }
-
     .toolbar {
         display: flex;
         gap: 6px;
@@ -41,12 +26,19 @@
         color: var(--text-muted);
         font-size: 14px;
         border: 1px solid var(--border);
+        backdrop-filter: blur(10px);
+        transition: .15s;
     }
 
     .toolbar a.active {
-        background: var(--accent);
-        color: #fff;
-        border-color: var(--accent);
+        background: linear-gradient(90deg, var(--c1), var(--c3));
+        color: #04151a;
+        border-color: transparent;
+        font-weight: 600;
+    }
+
+    .toolbar a:hover:not(.active) {
+        border-color: var(--c1);
     }
 
     .grid {
@@ -59,14 +51,40 @@
     .card {
         position: relative;
         background: var(--bg-card);
-        border-radius: 12px;
+        backdrop-filter: blur(16px);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
         overflow: hidden;
         display: flex;
         flex-direction: column;
+        transition: .22s;
+        min-width: 0;
+    }
+
+    .card:hover {
+        transform: translateY(-4px);
+        border-color: var(--c1);
+        box-shadow: 0 0 30px rgba(45, 212, 191, .20), 0 0 10px rgba(125, 211, 252, .12);
     }
 
     .card.local {
         border: 1px dashed var(--accent);
+    }
+
+    .card-new {
+        animation: card-highlight 2s ease-in-out infinite;
+    }
+
+    @keyframes card-highlight {
+
+        0%,
+        100% {
+            box-shadow: 0 0 0 3px rgba(45, 212, 191, .4);
+        }
+
+        50% {
+            box-shadow: 0 0 0 6px rgba(45, 212, 191, .6), 0 0 20px rgba(45, 212, 191, .3);
+        }
     }
 
     /* ── Флип-постер ── */
@@ -110,23 +128,26 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        background: var(--no-poster-bg);
+        background: linear-gradient(150deg, rgba(45, 212, 191, .17), rgba(125, 211, 252, .14), rgba(52, 211, 153, .11));
         color: var(--no-poster-text);
     }
 
     .flip-back {
         transform: rotateY(180deg);
-        background: var(--bg-hover);
+        background: rgba(255, 255, 255, .08);
+        backdrop-filter: blur(20px);
         display: flex;
         flex-direction: column;
         gap: 8px;
         padding: 10px;
+        border: 1px solid var(--border-light);
     }
 
     .flip-actions {
         display: flex;
         flex-direction: column;
         gap: 6px;
+        min-width: 0;
     }
 
     .source-back {
@@ -139,11 +160,10 @@
         font-size: 11px;
     }
 
-    /* Кнопки на обороте — крупнее */
     .flip-btn {
         width: 100%;
         padding: 10px 8px;
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         font-size: 13px;
         background: transparent;
         cursor: pointer;
@@ -156,11 +176,13 @@
         transition: background .15s, filter .15s;
         white-space: nowrap;
         text-decoration: none;
+        backdrop-filter: blur(10px);
+        min-width: 0;
     }
 
     .flip-btn:hover {
         filter: brightness(1.25);
-        background: rgba(255, 255, 255, .06);
+        background: rgba(255, 255, 255, .08);
     }
 
     .flip-btn:disabled {
@@ -169,13 +191,13 @@
     }
 
     .btn-blue {
-        border-color: #4f8cff;
-        color: #4f8cff;
+        border-color: var(--c3);
+        color: var(--c3);
     }
 
     .btn-red {
-        border-color: #ff5c5c;
-        color: #ff5c5c;
+        border-color: var(--error);
+        color: var(--error);
     }
 
     .btn-orange {
@@ -184,8 +206,8 @@
     }
 
     .btn-green {
-        border-color: #3ddc84;
-        color: #3ddc84;
+        border-color: var(--success);
+        color: var(--success);
     }
 
     .btn-purple {
@@ -204,7 +226,6 @@
         display: inline-block;
     }
 
-    /* Оверлеи лицевой стороны */
     .poster-icons {
         position: absolute;
         top: 6px;
@@ -213,6 +234,7 @@
         gap: 4px;
         z-index: 4;
         align-items: center;
+        max-width: calc(100% - 12px);
     }
 
     .icon-btn {
@@ -228,6 +250,8 @@
         align-items: center;
         justify-content: center;
         transition: background .15s;
+        backdrop-filter: blur(8px);
+        flex-shrink: 0;
     }
 
     .icon-btn:hover {
@@ -252,29 +276,34 @@
         align-items: center;
         justify-content: center;
         box-shadow: 0 0 0 2px rgba(0, 0, 0, .4);
+        flex-shrink: 0;
     }
 
     .poster-badge {
         position: absolute;
         padding: 3px 8px;
-        border-radius: 6px;
+        border-radius: 8px;
         font-size: 11px;
         font-weight: 600;
         z-index: 2;
+        max-width: calc(100% - 12px);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .poster-badge.next {
         left: 6px;
         bottom: 6px;
-        background: rgba(79, 140, 255, .92);
-        color: #fff;
+        background: rgba(45, 212, 191, .95);
+        color: #04231f;
     }
 
     .poster-badge.soon {
         left: 6px;
         bottom: 6px;
-        background: rgba(79, 140, 255, .92);
-        color: #fff;
+        background: rgba(45, 212, 191, .95);
+        color: #04231f;
     }
 
     .poster-badge.out {
@@ -287,8 +316,8 @@
     .poster-badge.airing {
         right: 6px;
         bottom: 6px;
-        background: rgba(61, 220, 132, .92);
-        color: #10131a;
+        background: rgba(110, 231, 183, .95);
+        color: #072b1a;
     }
 
     .poster-badge.finished {
@@ -298,10 +327,10 @@
         color: #9aa1b0;
     }
 
-    /* ── Инфо-блок ── */
     .info {
         padding: 12px 12px 8px;
         flex: 1 1 auto;
+        min-width: 0;
     }
 
     .card h2 {
@@ -309,6 +338,11 @@
         line-height: 1.4;
         margin: 0 0 6px;
         min-height: 2.8em;
+        font-weight: 600;
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
     }
 
     .year {
@@ -328,9 +362,14 @@
     .tag {
         padding: 2px 8px;
         border-radius: 999px;
-        background: var(--bg-hover);
+        background: var(--tag-bg);
         color: var(--text-muted);
         font-size: 11px;
+        border: 1px solid var(--border-light);
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .seasons-link {
@@ -339,6 +378,9 @@
         text-decoration: none;
         font-size: 13px;
         min-height: 1.6em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .seasons-link:hover {
@@ -356,13 +398,14 @@
         flex: 1;
         height: 4px;
         border-radius: 2px;
-        background: var(--bg-hover);
+        background: var(--progress-bg);
         overflow: hidden;
+        min-width: 0;
     }
 
     .watch-fill {
         height: 100%;
-        background: var(--success);
+        background: linear-gradient(90deg, var(--c1), var(--c3));
     }
 
     .watch-text {
@@ -386,7 +429,9 @@
         display: none;
         margin-bottom: 16px;
         background: var(--bg-card);
-        border-radius: 8px;
+        backdrop-filter: blur(16px);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
         padding: 12px;
     }
 
@@ -398,7 +443,7 @@
     }
 
     #progress-wrap .bar-fill {
-        background: var(--accent);
+        background: linear-gradient(90deg, var(--c1), var(--c3));
         height: 100%;
         width: 0;
         transition: width .5s;
@@ -410,7 +455,6 @@
         margin-top: 6px;
     }
 
-    /* ── Модалка ── */
     .modal-overlay {
         display: none;
         position: fixed;
@@ -419,6 +463,7 @@
         right: 0;
         bottom: 0;
         background: rgba(0, 0, 0, .7);
+        backdrop-filter: blur(8px);
         z-index: 100;
         align-items: center;
         justify-content: center;
@@ -431,7 +476,9 @@
 
     .modal {
         background: var(--bg-card);
-        border-radius: 12px;
+        backdrop-filter: blur(20px);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
         max-width: 560px;
         width: 100%;
         max-height: 85vh;
@@ -448,6 +495,7 @@
 
     .modal-header h3 {
         font-size: 17px;
+        font-weight: 700;
     }
 
     .modal-close {
@@ -479,12 +527,18 @@
         color: var(--text-muted);
         font-size: 13px;
         cursor: pointer;
+        transition: .15s;
     }
 
     .mtab.active {
-        background: var(--accent);
-        border-color: var(--accent);
-        color: #fff;
+        background: linear-gradient(90deg, var(--c1), var(--c3));
+        border-color: transparent;
+        color: #04151a;
+        font-weight: 600;
+    }
+
+    .mtab:hover:not(.active) {
+        border-color: var(--c1);
     }
 
     .modal-body {
@@ -518,6 +572,7 @@
         align-items: center;
         gap: 8px;
         margin-bottom: 8px;
+        flex-wrap: wrap;
     }
 
     .radio-row input {
@@ -559,7 +614,7 @@
     .learn-btn {
         flex: 1;
         padding: 10px 12px;
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         border: 1px solid var(--accent);
         background: var(--accent-bg);
         color: var(--accent-text);
@@ -569,8 +624,102 @@
     }
 
     .learn-btn:hover {
-        background: var(--accent);
-        color: #fff;
+        background: linear-gradient(90deg, var(--c1), var(--c3));
+        color: #04151a;
+    }
+
+    /* ═══ МОБИЛЬНАЯ ВЕРСИЯ ═══ */
+    @media (max-width:700px) {
+        .grid {
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 10px;
+        }
+
+        .card h2 {
+            font-size: 13px;
+            min-height: 2.6em;
+        }
+
+        .year {
+            font-size: 11px;
+        }
+
+        .tag {
+            font-size: 10px;
+            padding: 2px 6px;
+        }
+
+        .seasons-link {
+            font-size: 11px;
+        }
+
+        .watch-text {
+            font-size: 10px;
+        }
+
+        .flip-hint {
+            display: none;
+        }
+
+        .flip-btn {
+            font-size: 11px;
+            padding: 8px 4px;
+            white-space: normal;
+            line-height: 1.2;
+        }
+
+        .count-badge {
+            font-size: 10px;
+        }
+
+        .poster-icons {
+            top: 4px;
+            right: 4px;
+            gap: 3px;
+        }
+
+        .icon-btn {
+            width: 24px;
+            height: 24px;
+            font-size: 12px;
+        }
+
+        .new-dot {
+            min-width: 16px;
+            height: 16px;
+            padding: 0 4px;
+            font-size: 10px;
+        }
+
+        .poster-badge {
+            font-size: 9px;
+            padding: 2px 6px;
+        }
+
+        .info {
+            padding: 8px 8px 6px;
+        }
+
+        .actions {
+            gap: 6px;
+        }
+
+        .actions .secondary {
+            padding: 8px 12px;
+            font-size: 12px;
+        }
+
+        .toolbar a {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+    }
+
+    @media (max-width:400px) {
+        .grid {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
     }
 </style>
 {% endblock %}
@@ -591,11 +740,10 @@
 
 <div class="actions">
     <form method="post" action="/refresh"><button class="secondary" type="submit">🔄 Обновить все даты</button></form>
-    <form method="post" action="/notify-all/on?sort={{ sort }}"><button class="secondary small" type="submit">🔔 Все
+    <form method="post" action="/notify-all/on?sort={{ sort }}"><button class="secondary" type="submit">🔔 Все
             вкл</button></form>
-    <form method="post" action="/notify-all/off?sort={{ sort }}"><button class="secondary small" type="submit">🔕 Все
+    <form method="post" action="/notify-all/off?sort={{ sort }}"><button class="secondary" type="submit">🔕 Все
             выкл</button></form>
-    <a href="/export.ics">📅 Скачать .ics</a>
 </div>
 
 <div class="toolbar">
@@ -738,7 +886,7 @@
                     <div class="field">
                         <label>Путь сохранения (опционально)</label>
                         <input type="text" name="download_path" id="dist-path" placeholder="/media/series/Название">
-                        <p class="hint">Оставьте пустым, чтобы использовать базовую директорию Transmission.</p>
+                        <p class="hint">Оставьте пустым, чтобы использовать базовую директорию клиента.</p>
                     </div>
                     <div class="field">
                         <label>Режим проверки</label>
@@ -791,6 +939,23 @@
 
 {% block extra_js %}
 <script>
+    (function () {
+        const url = new URL(window.location.href);
+        const newId = url.searchParams.get('new');
+        if (!newId) return;
+        url.searchParams.delete('new');
+        window.history.replaceState({}, '', url.toString());
+        document.querySelectorAll('.card').forEach(function (card) {
+            const flip = card.querySelector('.flip');
+            if (flip && flip.dataset.id === newId) {
+                card.classList.add('card-new');
+                flip.addEventListener('click', function () {
+                    card.classList.remove('card-new');
+                }, { once: true });
+            }
+        });
+    })();
+
     const patternsData = {{ patterns_json | safe }};
     const CONF_RU = { low: 'низкая', medium: 'средняя', high: 'высокая' };
 
@@ -904,7 +1069,7 @@
         const form = e.target.closest('.js-download-form');
         if (form) {
             const name = form.dataset.title || '';
-            if (!confirm(`Отправить раздачу «${name}» в Transmission?\n\nСкачивание начнётся сразу (согласно настройкам Transmission).`)) e.preventDefault();
+            if (!confirm(`Отправить раздачу «${name}» в клиент загрузок?\n\nСкачивание начнётся сразу (согласно настройкам).`)) e.preventDefault();
         }
     });
 </script>
