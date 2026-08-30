@@ -7,9 +7,59 @@
         padding-bottom: 90px;
     }
 
+    /* ── Якорная навигация по разделам ── */
+    .section-nav {
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+        padding-bottom: 4px;
+        margin-bottom: 20px;
+        position: sticky;
+        top: 0;
+        background: var(--bg);
+        z-index: 20;
+        scrollbar-width: none;
+    }
+
+    .section-nav::-webkit-scrollbar {
+        display: none;
+    }
+
+    .section-nav a {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 14px;
+        border-radius: 999px;
+        border: 1px solid var(--border-light);
+        background: var(--bg-card);
+        color: var(--text-muted);
+        text-decoration: none;
+        font-size: 13px;
+        white-space: nowrap;
+        transition: .15s;
+    }
+
+    .section-nav a i {
+        font-size: 15px;
+    }
+
+    .section-nav a:hover {
+        border-color: var(--c1);
+        color: var(--text);
+    }
+
+    .section-nav a.current {
+        background: var(--accent-bg);
+        border-color: var(--accent);
+        color: var(--accent-text);
+        font-weight: 600;
+    }
+
     /* ── Группы ── */
     .group {
         margin-bottom: 28px;
+        scroll-margin-top: 56px;
     }
 
     .group-title {
@@ -24,6 +74,10 @@
         margin: 0 0 12px;
     }
 
+    .group-title i {
+        font-size: 15px;
+    }
+
     /* ── Карточки ── */
     .card {
         background: var(--bg-section);
@@ -31,6 +85,10 @@
         border-radius: 14px;
         padding: 18px 20px;
         margin-bottom: 14px;
+    }
+
+    .card.danger-zone {
+        border-color: rgba(255, 107, 107, .35);
     }
 
     .card-head {
@@ -41,7 +99,11 @@
     }
 
     .card-head .ico {
-        font-size: 20px;
+        font-size: 18px;
+        color: var(--text-muted);
+        width: 22px;
+        text-align: center;
+        flex-shrink: 0;
     }
 
     .card-head h3 {
@@ -51,9 +113,16 @@
     }
 
     .card h4 {
+        display: flex;
+        align-items: center;
+        gap: 6px;
         font-size: 13px;
         color: var(--text-muted);
         margin: 16px 0 8px;
+    }
+
+    .card h4 i {
+        font-size: 14px;
     }
 
     .field {
@@ -113,7 +182,15 @@
     }
 
     .t-text .t-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
         font-size: 14px;
+    }
+
+    .t-text .t-label i {
+        font-size: 15px;
+        color: var(--text-faint);
     }
 
     .t-text .t-hint {
@@ -220,16 +297,37 @@
         margin-top: 12px;
     }
 
+    .btn-row button {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
     .card-footer {
         display: flex;
         justify-content: flex-end;
         margin-top: 14px;
     }
 
+    .card-footer button {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
     .warning-text {
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
         font-size: 13px;
         color: var(--error);
         margin-top: 8px;
+    }
+
+    .warning-text i {
+        font-size: 15px;
+        margin-top: 1px;
+        flex-shrink: 0;
     }
 
     .last-sent {
@@ -253,6 +351,8 @@
     }
 
     .info-box {
+        display: flex;
+        gap: 8px;
         background: var(--bg-card);
         padding: 10px 14px;
         border-radius: 8px;
@@ -262,8 +362,21 @@
         color: var(--text-muted);
     }
 
+    .info-box i {
+        font-size: 15px;
+        margin-top: 2px;
+        flex-shrink: 0;
+        color: var(--accent-text);
+    }
+
+    /* ── Таблица журнала (со скроллом на мобильном) ── */
+    .table-scroll {
+        overflow-x: auto;
+    }
+
     .log-table {
         width: 100%;
+        min-width: 560px;
         border-collapse: collapse;
         font-size: 14px;
         margin-top: 8px;
@@ -325,47 +438,131 @@
         color: var(--text-muted);
     }
 
+    .savebar span {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+    }
+
     .savebar button {
         margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    @media (max-width:700px) {
+        .savebar {
+            bottom: 68px;
+            padding-bottom: 12px;
+        }
+
+        .main {
+            padding-bottom: 150px;
+        }
+    }
+
+    /* ── Модалка подтверждения ── */
+    .modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, .7);
+        backdrop-filter: blur(8px);
+        z-index: 100;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+    }
+
+    .modal-overlay.open {
+        display: flex;
+    }
+
+    .confirm-modal {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        max-width: 400px;
+        width: 100%;
+        padding: 20px;
+        box-shadow: 0 8px 40px rgba(0, 0, 0, .5);
+    }
+
+    .confirm-modal p {
+        font-size: 14px;
+        line-height: 1.5;
+        margin-bottom: 18px;
+    }
+
+    .confirm-modal .modal-actions {
+        display: flex;
+        gap: 8px;
+    }
+
+    .confirm-modal .modal-actions button {
+        flex: 1;
+        padding: 10px;
+        border-radius: var(--radius-sm);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        border: 1px solid var(--border-light);
+        background: var(--bg-hover);
+        color: var(--text);
+    }
+
+    .confirm-modal .modal-actions button.danger {
+        border-color: var(--error);
+        background: var(--delete-btn-bg);
+        color: var(--error);
     }
 </style>
 {% endblock %}
 
 {% block content %}
-<h1 class="page-title">⚙ Настройки</h1>
+<h1 class="page-title">Настройки</h1>
 
 {% if message %}<p class="message">{{ message }}</p>{% endif %}
 {% if error_message %}<p class="error">{{ error_message }}</p>{% endif %}
 
+<nav class="section-nav" aria-label="Разделы настроек">
+    <a href="#appearance"><i class="ti ti-palette" aria-hidden="true"></i>Внешний вид</a>
+    <a href="#integrations"><i class="ti ti-plug" aria-hidden="true"></i>Интеграции</a>
+    <a href="#system"><i class="ti ti-tool" aria-hidden="true"></i>Системные</a>
+</nav>
+
 <!-- ═══════════ ВНЕШНИЙ ВИД ═══════════ -->
-<div class="group">
-    <div class="group-title">🎨 Внешний вид</div>
+<div class="group" id="appearance">
+    <div class="group-title"><i class="ti ti-palette" aria-hidden="true"></i>Внешний вид</div>
 
     <div class="card">
-        <div class="card-head"><span class="ico">🌗</span>
+        <div class="card-head"><i class="ico ti ti-moon-stars" aria-hidden="true"></i>
             <h3>Тема оформления</h3>
         </div>
         <form method="post" action="/settings/theme" class="settings-form" data-title="Тема оформления">
             <div class="field">
                 <label>Тема интерфейса</label>
                 <select name="theme">
-                    <option value="dark" {% if theme=='dark' %}selected{% endif %}>🌙 Тёмная</option>
-                    <option value="light" {% if theme=='light' %}selected{% endif %}>☀️ Светлая</option>
+                    <option value="dark" {% if theme=='dark' %}selected{% endif %}>Тёмная</option>
+                    <option value="light" {% if theme=='light' %}selected{% endif %}>Светлая</option>
                 </select>
             </div>
-            <div class="card-footer"><button type="submit">Сохранить</button></div>
+            <div class="card-footer"><button type="submit"><i class="ti ti-device-floppy"
+                        aria-hidden="true"></i>Сохранить</button></div>
         </form>
     </div>
 </div>
 
 <!-- ═══════════ ИНТЕГРАЦИИ / ТОКЕНЫ ═══════════ -->
-<div class="group">
-    <div class="group-title">🔌 Интеграции и токены</div>
+<div class="group" id="integrations">
+    <div class="group-title"><i class="ti ti-plug" aria-hidden="true"></i>Интеграции и токены</div>
 
     <!-- Telegram -->
     <div class="card">
         <div class="card-head">
-            <span class="ico">🔔</span>
+            <i class="ico ti ti-brand-telegram" aria-hidden="true"></i>
             <h3>Telegram-уведомления</h3>
             {% if tg.get('enabled') and tg.get('bot_token') and tg.get('chat_id') %}
             <span class="status ok"><span class="dot"></span>Включено</span>
@@ -427,7 +624,7 @@
             </div>
             <div class="toggle-row">
                 <div class="t-text">
-                    <div class="t-label">📥 Старт скачивания</div>
+                    <div class="t-label"><i class="ti ti-download" aria-hidden="true"></i>Старт скачивания</div>
                     <div class="t-hint">Торрент отправлен в клиент</div>
                 </div>
                 <label class="switch"><input type="checkbox" name="notify_torrent_started" {% if
@@ -435,7 +632,8 @@
             </div>
             <div class="toggle-row">
                 <div class="t-text">
-                    <div class="t-label">✅ Завершение скачивания</div>
+                    <div class="t-label"><i class="ti ti-circle-check" aria-hidden="true"></i>Завершение скачивания
+                    </div>
                     <div class="t-hint">Торрент полностью скачан</div>
                 </div>
                 <label class="switch"><input type="checkbox" name="notify_torrent_completed" {% if
@@ -443,14 +641,14 @@
             </div>
             <div class="toggle-row">
                 <div class="t-text">
-                    <div class="t-label">🏁 Завершение сезона</div>
+                    <div class="t-label"><i class="ti ti-flag-check" aria-hidden="true"></i>Завершение сезона</div>
                     <div class="t-hint">Все эпизоды сезона скачаны</div>
                 </div>
                 <label class="switch"><input type="checkbox" name="notify_season_completed" {% if
                         tg.get('notify_season_completed', 1) %}checked{% endif %}><span class="slider"></span></label>
             </div>
 
-            <h4>📅 Ежедневная рассылка</h4>
+            <h4><i class="ti ti-calendar-event" aria-hidden="true"></i>Ежедневная рассылка</h4>
             <div class="two-col">
                 <div class="field"><label>Время отправки</label>
                     <input type="time" name="send_time" value="{{ tg.get('send_time', '09:00') }}">
@@ -475,36 +673,37 @@
                 </select>
             </div>
 
-            <h4>🧪 Тест</h4>
-            <div class="btn-row">
-                <button type="submit" formaction="/settings/telegram/test/simple" class="secondary small">💬
-                    Простое</button>
-                <button type="submit" formaction="/settings/telegram/test/date-change" class="secondary small">📅
-                    Дата</button>
-                <button type="submit" formaction="/settings/telegram/test/new-card" class="secondary small">🆕
-                    Карточка</button>
-                <button type="submit" formaction="/settings/telegram/test/new-season" class="secondary small">📺
-                    Сезон</button>
-                <button type="submit" formaction="/settings/telegram/test/new-episodes" class="secondary small">🎬
-                    Эпизод</button>
-                <button type="submit" formaction="/settings/telegram/test/torrent-started" class="secondary small">📥
-                    Старт</button>
-                <button type="submit" formaction="/settings/telegram/test/torrent-completed" class="secondary small">✅
-                    Готов</button>
-                <button type="submit" formaction="/settings/telegram/test/season-completed" class="secondary small">🏁
-                    Сезон</button>
-                <button type="submit" formaction="/settings/telegram/test/daily" class="secondary small">🔔
-                    Рассылка</button>
+            <h4><i class="ti ti-flask" aria-hidden="true"></i>Тест</h4>
+            <div class="two-col">
+                <div class="field" style="margin-bottom:0">
+                    <label>Тип тестового уведомления</label>
+                    <select id="tg-test-type">
+                        <option value="/settings/telegram/test/simple">Простое сообщение</option>
+                        <option value="/settings/telegram/test/date-change">Перенос даты</option>
+                        <option value="/settings/telegram/test/new-card">Новая карточка</option>
+                        <option value="/settings/telegram/test/new-season">Новый сезон</option>
+                        <option value="/settings/telegram/test/new-episodes">Новый эпизод</option>
+                        <option value="/settings/telegram/test/torrent-started">Старт скачивания</option>
+                        <option value="/settings/telegram/test/torrent-completed">Скачивание завершено</option>
+                        <option value="/settings/telegram/test/season-completed">Сезон завершён</option>
+                        <option value="/settings/telegram/test/daily">Ежедневная рассылка</option>
+                    </select>
+                </div>
+                <div class="field" style="margin-bottom:0;justify-content:flex-end">
+                    <button type="button" id="tg-test-send" class="secondary" style="height:44px"><i class="ti ti-send"
+                            aria-hidden="true"></i>Отправить тест</button>
+                </div>
             </div>
             {% if tg.get('last_sent') %}<p class="last-sent">Последняя отправка: {{ tg['last_sent'] }}</p>{% endif %}
-            <div class="card-footer"><button type="submit">Сохранить</button></div>
+            <div class="card-footer"><button type="submit"><i class="ti ti-device-floppy"
+                        aria-hidden="true"></i>Сохранить</button></div>
         </form>
     </div>
 
     <!-- Клиент загрузок -->
     <div class="card">
         <div class="card-head">
-            <span class="ico">📡</span>
+            <i class="ico ti ti-antenna-bars-5" aria-hidden="true"></i>
             <h3>Клиент загрузок</h3>
             {% if trans.get('enabled') %}
             <span class="status ok"><span class="dot"></span>{{ 'Deluge' if trans.get('client_type')=='deluge' else
@@ -535,7 +734,7 @@
 
             <div id="block-transmission" class="client-block"
                 style="{% if trans.get('client_type') == 'deluge' %}display:none{% endif %}">
-                <h4>🟠 Transmission</h4>
+                <h4><i class="ti ti-server-2" aria-hidden="true"></i>Transmission</h4>
                 <div class="two-col">
                     <div class="field"><label>Хост</label><input type="text" name="host"
                             value="{{ trans.get('host', 'localhost') }}"></div>
@@ -546,19 +745,21 @@
                     <div class="field"><label>Логин</label><input type="text" name="username"
                             value="{{ trans.get('username', '') }}"></div>
                     <div class="field"><label>Пароль</label><input type="password" name="password"
-                            placeholder="••••••••"></div>
+                            placeholder="{{ 'сохранён — оставьте пустым, чтобы не менять' if trans.get('has_password') else '' }}">
+                    </div>
                 </div>
             </div>
 
             <div id="block-deluge" class="client-block"
                 style="{% if trans.get('client_type') != 'deluge' %}display:none{% endif %}">
-                <h4>🔵 Deluge</h4>
+                <h4><i class="ti ti-server-2" aria-hidden="true"></i>Deluge</h4>
                 <div class="field"><label>Deluge URL</label>
                     <input type="text" name="deluge_url" value="{{ trans.get('deluge_url', '') }}"
                         placeholder="http://localhost:8115">
                 </div>
                 <div class="field"><label>Пароль Deluge (web)</label>
-                    <input type="password" name="deluge_password" placeholder="••••••••">
+                    <input type="password" name="deluge_password"
+                        placeholder="{{ 'сохранён — оставьте пустым, чтобы не менять' if trans.get('has_deluge_password') else '' }}">
                 </div>
             </div>
 
@@ -597,7 +798,7 @@
             </div>
             <div class="toggle-row">
                 <div class="t-text">
-                    <div class="t-label">🤖 Автопроверка раздач</div>
+                    <div class="t-label"><i class="ti ti-robot" aria-hidden="true"></i>Автопроверка раздач</div>
                     <div class="t-hint">Периодически проверять раздачи на обновления</div>
                 </div>
                 <label class="switch"><input type="checkbox" name="auto_check_enabled" {% if
@@ -614,7 +815,7 @@
 
             <div class="toggle-row">
                 <div class="t-text">
-                    <div class="t-label">🧹 Автоочистка торрентов</div>
+                    <div class="t-label"><i class="ti ti-trash-x" aria-hidden="true"></i>Автоочистка торрентов</div>
                     <div class="t-hint">Удалять завершённые из клиента</div>
                 </div>
                 <label class="switch"><input type="checkbox" name="auto_clean_enabled" {% if
@@ -651,16 +852,17 @@
             </div>
 
             <div class="btn-row">
-                <button type="submit" formaction="/settings/transmission/test" class="secondary">🔌 Проверить
-                    соединение</button>
+                <button type="submit" formaction="/settings/transmission/test" class="secondary"><i
+                        class="ti ti-plug-connected" aria-hidden="true"></i>Проверить соединение</button>
             </div>
-            <div class="card-footer"><button type="submit">Сохранить</button></div>
+            <div class="card-footer"><button type="submit"><i class="ti ti-device-floppy"
+                        aria-hidden="true"></i>Сохранить</button></div>
         </form>
     </div>
 
     <!-- Трекеры -->
     <div class="card">
-        <div class="card-head"><span class="ico">🌍</span>
+        <div class="card-head"><i class="ico ti ti-world" aria-hidden="true"></i>
             <h3>rutracker.org</h3>
             {% if tracker_rt and tracker_rt.get('enabled') and tracker_rt_has_cookies %}<span class="status ok"><span
                     class="dot"></span>Подключено</span>
@@ -677,30 +879,33 @@
                 <label class="switch"><input type="checkbox" name="enabled" {% if tracker_rt and
                         tracker_rt.get('enabled') %}checked{% endif %}><span class="slider"></span></label>
             </div>
-            <h4>Cookies из браузера (рекомендуется)</h4>
+            <h4><i class="ti ti-cookie" aria-hidden="true"></i>Cookies из браузера (рекомендуется)</h4>
             <div class="field"><textarea name="cookies_manual" rows="3"
                     placeholder="bb_guid=...; bb_session=...; bb_ssl=1; cf_clearance=..."></textarea></div>
             <div class="field"><label>User-Agent браузера (обязательно)</label>
                 <input type="text" name="user_agent"
                     value="{{ tracker_rt.get('user_agent', '') if tracker_rt else '' }}">
             </div>
-            <h4>Логин / пароль (fallback)</h4>
+            <h4><i class="ti ti-key" aria-hidden="true"></i>Логин / пароль (fallback)</h4>
             <div class="two-col">
                 <div class="field"><label>Логин</label><input type="text" name="username"
                         value="{{ tracker_rt.get('username', '') if tracker_rt else '' }}"></div>
-                <div class="field"><label>Пароль</label><input type="password" name="password" placeholder="••••••••">
+                <div class="field"><label>Пароль</label><input type="password" name="password"
+                        placeholder="{{ 'сохранён — оставьте пустым, чтобы не менять' if tracker_rt and tracker_rt.get('has_password') else '' }}">
                 </div>
             </div>
-            {% if tracker_rt and tracker_rt.get('last_error') %}<p class="status-line err">Ошибка: {{
+            {% if tracker_rt and tracker_rt.get('last_error') %}<p class="status-line err"><i
+                    class="ti ti-alert-triangle" aria-hidden="true"></i> Ошибка: {{
                 tracker_rt['last_error'] }}</p>{% endif %}
-            <div class="btn-row"><button type="submit" formaction="/settings/tracker/test" class="secondary">🔑
-                    Проверить</button></div>
-            <div class="card-footer"><button type="submit">Сохранить</button></div>
+            <div class="btn-row"><button type="submit" formaction="/settings/tracker/test" class="secondary"><i
+                        class="ti ti-key" aria-hidden="true"></i>Проверить</button></div>
+            <div class="card-footer"><button type="submit"><i class="ti ti-device-floppy"
+                        aria-hidden="true"></i>Сохранить</button></div>
         </form>
     </div>
 
     <div class="card">
-        <div class="card-head"><span class="ico">🎬</span>
+        <div class="card-head"><i class="ico ti ti-movie" aria-hidden="true"></i>
             <h3>kinozal.me</h3>
             {% if tracker_kz and tracker_kz.get('enabled') and tracker_kz_has_cookies %}<span class="status ok"><span
                     class="dot"></span>Подключено</span>
@@ -717,36 +922,40 @@
                 <label class="switch"><input type="checkbox" name="enabled" {% if tracker_kz and
                         tracker_kz.get('enabled') %}checked{% endif %}><span class="slider"></span></label>
             </div>
-            <h4>Cookies из браузера (рекомендуется)</h4>
+            <h4><i class="ti ti-cookie" aria-hidden="true"></i>Cookies из браузера (рекомендуется)</h4>
             <div class="field"><textarea name="cookies_manual" rows="3" placeholder="uid=...; pass=...; ..."></textarea>
             </div>
             <div class="field"><label>User-Agent браузера (обязательно)</label>
                 <input type="text" name="user_agent"
                     value="{{ tracker_kz.get('user_agent', '') if tracker_kz else '' }}">
             </div>
-            <h4>Логин / пароль (fallback)</h4>
+            <h4><i class="ti ti-key" aria-hidden="true"></i>Логин / пароль (fallback)</h4>
             <div class="two-col">
                 <div class="field"><label>Логин</label><input type="text" name="username"
                         value="{{ tracker_kz.get('username', '') if tracker_kz else '' }}"></div>
-                <div class="field"><label>Пароль</label><input type="password" name="password" placeholder="••••••••">
+                <div class="field"><label>Пароль</label><input type="password" name="password"
+                        placeholder="{{ 'сохранён — оставьте пустым, чтобы не менять' if tracker_kz and tracker_kz.get('has_password') else '' }}">
                 </div>
             </div>
-            {% if tracker_kz and tracker_kz.get('last_error') %}<p class="status-line err">Ошибка: {{
+            {% if tracker_kz and tracker_kz.get('last_error') %}<p class="status-line err"><i
+                    class="ti ti-alert-triangle" aria-hidden="true"></i> Ошибка: {{
                 tracker_kz['last_error'] }}</p>{% endif %}
-            <div class="btn-row"><button type="submit" formaction="/settings/tracker/test" class="secondary">🔑
-                    Проверить</button></div>
-            <div class="card-footer"><button type="submit">Сохранить</button></div>
+            <div class="btn-row"><button type="submit" formaction="/settings/tracker/test" class="secondary"><i
+                        class="ti ti-key" aria-hidden="true"></i>Проверить</button></div>
+            <div class="card-footer"><button type="submit"><i class="ti ti-device-floppy"
+                        aria-hidden="true"></i>Сохранить</button></div>
         </form>
     </div>
 
     <div class="card">
-        <div class="card-head"><span class="ico">🌐</span>
+        <div class="card-head"><i class="ico ti ti-world-www" aria-hidden="true"></i>
             <h3>rutor.info</h3>
             {% if tracker_ru and tracker_ru.get('enabled') %}<span class="status ok"><span
                     class="dot"></span>Включён</span>
             {% else %}<span class="status off"><span class="dot"></span>Выключен</span>{% endif %}
         </div>
-        <div class="info-box">rutor.info не требует авторизации — работает без cookies.</div>
+        <div class="info-box"><i class="ti ti-info-circle" aria-hidden="true"></i><span>rutor.info не требует
+                авторизации — работает без cookies.</span></div>
         <form method="post" action="/settings/tracker" class="settings-form" data-title="rutor">
             <input type="hidden" name="tracker_name" value="rutor">
             <div class="toggle-row">
@@ -756,17 +965,18 @@
                 <label class="switch"><input type="checkbox" name="enabled" {% if tracker_ru and
                         tracker_ru.get('enabled') %}checked{% endif %}><span class="slider"></span></label>
             </div>
-            <div class="card-footer"><button type="submit">Сохранить</button></div>
+            <div class="card-footer"><button type="submit"><i class="ti ti-device-floppy"
+                        aria-hidden="true"></i>Сохранить</button></div>
         </form>
     </div>
 </div>
 
 <!-- ═══════════ СИСТЕМНЫЕ ═══════════ -->
-<div class="group">
-    <div class="group-title">🛠 Системные</div>
+<div class="group" id="system">
+    <div class="group-title"><i class="ti ti-tool" aria-hidden="true"></i>Системные</div>
 
     <div class="card">
-        <div class="card-head"><span class="ico">🔄</span>
+        <div class="card-head"><i class="ico ti ti-refresh" aria-hidden="true"></i>
             <h3>Автообновление каталога</h3>
         </div>
         <form method="post" action="/settings/refresh" class="settings-form" data-title="Автообновление">
@@ -783,12 +993,13 @@
                 </select>
                 <p class="hint">Сейчас: {{ refresh_label }}.</p>
             </div>
-            <div class="card-footer"><button type="submit">Сохранить</button></div>
+            <div class="card-footer"><button type="submit"><i class="ti ti-device-floppy"
+                        aria-hidden="true"></i>Сохранить</button></div>
         </form>
     </div>
 
     <div class="card">
-        <div class="card-head"><span class="ico">🌐</span>
+        <div class="card-head"><i class="ico ti ti-network" aria-hidden="true"></i>
             <h3>Прокси</h3>
             {% if proxy_url %}<span class="status ok"><span class="dot"></span>Задан</span>
             {% else %}<span class="status off"><span class="dot"></span>Не задан</span>{% endif %}
@@ -797,17 +1008,18 @@
             <div class="field"><label>URL прокси-сервера</label>
                 <input type="text" name="proxy_url" value="{{ proxy_url }}" placeholder="http://proxy.example.com:8080">
             </div>
-            <div class="btn-row"><button type="submit" formaction="/settings/proxy/test" class="secondary">🔍
-                    Проверить</button></div>
-            <div class="card-footer"><button type="submit">Сохранить</button></div>
+            <div class="btn-row"><button type="submit" formaction="/settings/proxy/test" class="secondary"><i
+                        class="ti ti-search" aria-hidden="true"></i>Проверить</button></div>
+            <div class="card-footer"><button type="submit"><i class="ti ti-device-floppy"
+                        aria-hidden="true"></i>Сохранить</button></div>
         </form>
     </div>
 
     <div class="card">
-        <div class="card-head"><span class="ico">💾</span>
+        <div class="card-head"><i class="ico ti ti-database" aria-hidden="true"></i>
             <h3>Бэкап и восстановление</h3>
         </div>
-        <h4>Создать бэкап</h4>
+        <h4><i class="ti ti-file-export" aria-hidden="true"></i>Создать бэкап</h4>
         <form method="post" action="/backup/create">
             <div class="toggle-row">
                 <div class="t-text">
@@ -837,64 +1049,84 @@
                 <label class="switch"><input type="checkbox" name="include_torrents" checked><span
                         class="slider"></span></label>
             </div>
-            <div class="btn-row"><button type="submit">📥 Скачать бэкап (.zip)</button></div>
+            <div class="btn-row"><button type="submit"><i class="ti ti-download" aria-hidden="true"></i>Скачать бэкап
+                    (.zip)</button></div>
         </form>
-        <h4>Восстановление</h4>
-        <form method="post" action="/backup/restore" enctype="multipart/form-data" onsubmit="return confirmRestore()">
-            <div class="field"><label>Файл бэкапа (.zip)</label>
-                <input type="file" name="file" accept=".zip" required>
-                <p class="warning-text">⚠️ Текущие данные будут заменены. Создаётся автоснапшот.</p>
+
+        <div class="card danger-zone" style="margin-top:18px;margin-bottom:0">
+            <div class="card-head"><i class="ico ti ti-alert-triangle" aria-hidden="true"
+                    style="color:var(--error)"></i>
+                <h3>Восстановление из бэкапа</h3>
             </div>
-            <div class="btn-row"><button type="submit" class="secondary">📤 Восстановить</button></div>
-        </form>
+            <p class="warning-text"><i class="ti ti-alert-triangle" aria-hidden="true"></i>Текущие данные будут
+                полностью заменены содержимым архива. Перед восстановлением автоматически создаётся снапшот, но действие
+                необратимо в рамках этой сессии.</p>
+            <form method="post" action="/backup/restore" enctype="multipart/form-data" id="restore-form"
+                data-confirm="Восстановить данные из бэкапа? Текущие настройки, карточки и раздачи будут заменены содержимым архива.">
+                <div class="field"><label>Файл бэкапа (.zip)</label>
+                    <input type="file" name="file" accept=".zip" required>
+                </div>
+                <div class="btn-row"><button type="submit" class="secondary"><i class="ti ti-file-import"
+                            aria-hidden="true"></i>Восстановить</button></div>
+            </form>
+        </div>
     </div>
 
     <div class="card">
-        <div class="card-head"><span class="ico">📋</span>
+        <div class="card-head"><i class="ico ti ti-history" aria-hidden="true"></i>
             <h3>Журнал обновлений</h3>
         </div>
         {% if log_rows %}
-        <table class="log-table">
-            <thead>
-                <tr>
-                    <th>Время</th>
-                    <th>Название</th>
-                    <th>Поле</th>
-                    <th>Было</th>
-                    <th>Стало</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for r in log_rows %}
-                <tr>
-                    <td>{{ r.created_at }}</td>
-                    <td>{{ r.title }}</td>
-                    <td><span class="field-name">{{ r.field }}</span></td>
-                    <td class="old">{{ r.old_value or '—' }}</td>
-                    <td class="new">{{ r.new_value or '—' }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        <div class="table-scroll">
+            <table class="log-table">
+                <thead>
+                    <tr>
+                        <th>Время</th>
+                        <th>Название</th>
+                        <th>Поле</th>
+                        <th>Было</th>
+                        <th>Стало</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in log_rows %}
+                    <tr>
+                        <td>{{ r.created_at }}</td>
+                        <td>{{ r.title }}</td>
+                        <td><span class="field-name">{{ r.field }}</span></td>
+                        <td class="old">{{ r.old_value or '—' }}</td>
+                        <td class="new">{{ r.new_value or '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
         {% else %}<p class="empty">Журнал пуст.</p>{% endif %}
     </div>
 </div>
 
 <!-- Плавающая панель сохранения -->
 <div class="savebar" id="savebar">
-    <span>✏️ Несохранённые изменения</span>
+    <span><i class="ti ti-edit" aria-hidden="true"></i>Несохранённые изменения</span>
     <span class="sb-title" id="sb-title"></span>
-    <button type="button" id="sb-save">💾 Сохранить</button>
+    <button type="button" id="sb-save"><i class="ti ti-device-floppy" aria-hidden="true"></i>Сохранить</button>
+</div>
+
+<!-- Модалка подтверждения (замена confirm()) -->
+<div class="modal-overlay" id="confirm-overlay">
+    <div class="confirm-modal">
+        <p id="confirm-message"></p>
+        <div class="modal-actions">
+            <button type="button" id="confirm-cancel">Отмена</button>
+            <button type="button" id="confirm-ok" class="danger">Подтвердить</button>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-    function confirmRestore() {
-        return confirm("ВНИМАНИЕ: Текущие данные будут заменены.\n\nПродолжить?");
-    }
-
-    // Переключение блоков Transmission / Deluge
+    /* Переключение блоков Transmission / Deluge */
     (function () {
         const sel = document.getElementById('client_type');
         if (!sel) return;
@@ -909,7 +1141,37 @@
         sync();
     })();
 
-    // Плавающая панель сохранения
+    /* Тест Telegram-уведомлений через один селектор вместо девяти кнопок */
+    (function () {
+        const btn = document.getElementById('tg-test-send');
+        const sel = document.getElementById('tg-test-type');
+        if (!btn || !sel) return;
+        btn.addEventListener('click', function () {
+            const form = btn.closest('form');
+            form.setAttribute('formaction', sel.value);
+            form.requestSubmit(btn);
+            form.removeAttribute('formaction');
+        });
+    })();
+
+    /* Якорная навигация: подсветка текущего раздела при скролле */
+    (function () {
+        const links = document.querySelectorAll('.section-nav a');
+        const sections = Array.from(links).map(a => document.querySelector(a.getAttribute('href')));
+        function onScroll() {
+            let current = sections[0];
+            sections.forEach(function (s) {
+                if (s && s.getBoundingClientRect().top - 80 <= 0) current = s;
+            });
+            links.forEach(function (a) {
+                a.classList.toggle('current', document.querySelector(a.getAttribute('href')) === current);
+            });
+        }
+        window.addEventListener('scroll', onScroll, { passive: true });
+        onScroll();
+    })();
+
+    /* Плавающая панель сохранения */
     (function () {
         const bar = document.getElementById('savebar');
         const title = document.getElementById('sb-title');
@@ -922,5 +1184,37 @@
         });
         btn.addEventListener('click', () => { if (current) current.requestSubmit(); });
     })();
+
+    /* Кастомное подтверждение вместо confirm() */
+    const confirmOverlay = document.getElementById('confirm-overlay');
+    const confirmMessage = document.getElementById('confirm-message');
+    const confirmOk = document.getElementById('confirm-ok');
+    const confirmCancel = document.getElementById('confirm-cancel');
+    let pendingForm = null;
+
+    document.addEventListener('submit', function (e) {
+        const form = e.target;
+        if (form.dataset.confirm) {
+            e.preventDefault();
+            pendingForm = form;
+            confirmMessage.textContent = form.dataset.confirm;
+            confirmOverlay.classList.add('open');
+        }
+    });
+
+    confirmOk.addEventListener('click', function () {
+        confirmOverlay.classList.remove('open');
+        if (pendingForm) { pendingForm.submit(); pendingForm = null; }
+    });
+    confirmCancel.addEventListener('click', function () {
+        confirmOverlay.classList.remove('open');
+        pendingForm = null;
+    });
+    confirmOverlay.addEventListener('click', function (e) {
+        if (e.target === confirmOverlay) { confirmOverlay.classList.remove('open'); pendingForm = null; }
+    });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') { confirmOverlay.classList.remove('open'); pendingForm = null; }
+    });
 </script>
 {% endblock %}

@@ -10,6 +10,7 @@
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/static/icon.svg">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
     <title>{% block title %}Movie Radar{% endblock %}</title>
     <style>
         /* ═══ Дизайн-система: Film Noir (тёмная) + адаптация (светлая) ═══ */
@@ -102,6 +103,7 @@
             min-height: 100vh;
         }
 
+        /* ═══ Сайдбар (десктоп) ═══ */
         .sidebar {
             width: 200px;
             flex-shrink: 0;
@@ -112,33 +114,53 @@
             position: sticky;
             top: 0;
             height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
 
         .sidebar .logo {
+            display: flex;
+            align-items: center;
+            gap: 8px;
             padding: 0 16px 16px;
-            font-size: 17px;
+            font-size: 16px;
             font-weight: 800;
             color: var(--c2);
-            letter-spacing: .02em;
-            text-shadow: 0 0 12px rgba(59, 130, 246, .4);
+            letter-spacing: .01em;
+        }
+
+        .sidebar .logo i {
+            font-size: 19px;
         }
 
         [data-theme="light"] .sidebar .logo {
             color: var(--c1);
-            text-shadow: none;
         }
 
         .sidebar nav {
             display: flex;
             flex-direction: column;
+            gap: 2px;
         }
 
         .sidebar nav a {
+            display: flex;
+            align-items: center;
+            gap: 10px;
             padding: 10px 16px;
+            margin: 0 8px;
+            border-radius: var(--radius-sm);
             color: var(--text-muted);
             text-decoration: none;
             font-size: 14px;
             transition: .15s;
+        }
+
+        .sidebar nav a i {
+            font-size: 17px;
+            width: 17px;
+            text-align: center;
+            flex-shrink: 0;
         }
 
         .sidebar nav a:hover {
@@ -152,10 +174,41 @@
             font-weight: 600;
         }
 
+        /* ═══ Верхняя мини-шапка (мобильная, только логотип) ═══ */
+        .mobile-topbar {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 14px 16px;
+            font-size: 15px;
+            font-weight: 800;
+            color: var(--c2);
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-card);
+            backdrop-filter: blur(14px);
+            position: sticky;
+            top: 0;
+            z-index: 40;
+        }
+
+        [data-theme="light"] .mobile-topbar {
+            color: var(--c1);
+        }
+
+        .mobile-topbar i {
+            font-size: 18px;
+        }
+
+        /* ═══ Нижняя таб-бар (мобильная навигация) ═══ */
+        .mobile-tabbar {
+            display: none;
+        }
+
         .main {
             flex: 1;
             padding: 20px 24px;
             width: 100%;
+            min-width: 0;
         }
 
         .page-title {
@@ -183,6 +236,9 @@
             font-size: 13px;
             font-weight: 600;
             transition: .15s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
         }
 
         button.secondary:hover {
@@ -228,11 +284,21 @@
         .message,
         .error {
             position: relative;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
             padding: 14px 48px 14px 16px;
             border-radius: var(--radius);
             margin-bottom: 16px;
             font-size: 14px;
             animation: flash-in .4s ease-out;
+        }
+
+        .message i,
+        .error i {
+            font-size: 17px;
+            margin-top: 1px;
+            flex-shrink: 0;
         }
 
         .message {
@@ -295,11 +361,11 @@
             background: none;
             border: 0;
             color: inherit;
-            font-size: 22px;
+            font-size: 16px;
             line-height: 1;
             cursor: pointer;
             opacity: .7;
-            padding: 4px 8px;
+            padding: 6px;
         }
 
         .flash-close:hover {
@@ -315,33 +381,58 @@
             color: var(--text-dim);
         }
 
+        /* ═══ Мобильная раскладка ═══ */
         @media (max-width:700px) {
             body {
                 flex-direction: column;
             }
 
             .sidebar {
-                width: 100%;
-                height: auto;
-                position: static;
-            }
-
-            .sidebar .logo {
                 display: none;
             }
 
-            .sidebar nav {
-                flex-direction: row;
-                overflow-x: auto;
-                width: 100%;
-            }
-
-            .sidebar nav a {
-                white-space: nowrap;
+            .mobile-topbar {
+                display: flex;
             }
 
             .main {
                 padding: 16px;
+                padding-bottom: calc(76px + env(safe-area-inset-bottom));
+            }
+
+            .mobile-tabbar {
+                display: flex;
+                position: fixed;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                z-index: 50;
+                background: var(--bg-card);
+                backdrop-filter: blur(16px);
+                border-top: 1px solid var(--border);
+                padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+            }
+
+            .mobile-tabbar a {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 3px;
+                padding: 6px 4px;
+                border-radius: var(--radius-sm);
+                color: var(--text-faint);
+                text-decoration: none;
+                font-size: 10px;
+                font-weight: 600;
+            }
+
+            .mobile-tabbar a i {
+                font-size: 20px;
+            }
+
+            .mobile-tabbar a.active {
+                color: var(--accent-text);
             }
         }
     </style>
@@ -350,17 +441,36 @@
 
 <body>
     <aside class="sidebar">
-        <div class="logo">🎬 Movie Radar</div>
+        <div class="logo"><i class="ti ti-radar" aria-hidden="true"></i>Movie Radar</div>
         <nav>
-            <a href="/" class="{% if request.url.path == '/' %}active{% endif %}">📋 Список</a>
-            <a href="/new" class="{% if request.url.path == '/new' %}active{% endif %}">➕ Добавить</a>
-            <a href="/downloads" class="{% if request.url.path == '/downloads' %}active{% endif %}">📥 Загрузки</a>
-            <a href="/settings" class="{% if request.url.path == '/settings' %}active{% endif %}">⚙ Настройки</a>
+            <a href="/" class="{% if request.url.path == '/' %}active{% endif %}"><i class="ti ti-list"
+                    aria-hidden="true"></i>Список</a>
+            <a href="/new" class="{% if request.url.path == '/new' %}active{% endif %}"><i class="ti ti-plus"
+                    aria-hidden="true"></i>Добавить</a>
+            <a href="/downloads" class="{% if request.url.path == '/downloads' %}active{% endif %}"><i
+                    class="ti ti-download" aria-hidden="true"></i>Загрузки</a>
+            <a href="/settings" class="{% if request.url.path == '/settings' %}active{% endif %}"><i
+                    class="ti ti-settings" aria-hidden="true"></i>Настройки</a>
         </nav>
     </aside>
+
+    <div class="mobile-topbar"><i class="ti ti-radar" aria-hidden="true"></i>Movie Radar</div>
+
     <main class="main">
         {% block content %}{% endblock %}
     </main>
+
+    <nav class="mobile-tabbar" aria-label="Основная навигация">
+        <a href="/" class="{% if request.url.path == '/' %}active{% endif %}"><i class="ti ti-list"
+                aria-hidden="true"></i>Список</a>
+        <a href="/new" class="{% if request.url.path == '/new' %}active{% endif %}"><i class="ti ti-plus"
+                aria-hidden="true"></i>Добавить</a>
+        <a href="/downloads" class="{% if request.url.path == '/downloads' %}active{% endif %}"><i
+                class="ti ti-download" aria-hidden="true"></i>Загрузки</a>
+        <a href="/settings" class="{% if request.url.path == '/settings' %}active{% endif %}"><i class="ti ti-settings"
+                aria-hidden="true"></i>Настройки</a>
+    </nav>
+
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
@@ -380,8 +490,14 @@
         })();
         document.addEventListener('DOMContentLoaded', function () {
             document.querySelectorAll('.message, .error').forEach(function (el) {
+                var icon = document.createElement('i');
+                icon.className = el.classList.contains('error') ? 'ti ti-alert-circle' : 'ti ti-circle-check';
+                icon.setAttribute('aria-hidden', 'true');
+                el.insertBefore(icon, el.firstChild);
+
                 var b = document.createElement('button');
-                b.type = 'button'; b.className = 'flash-close'; b.innerHTML = '&times;'; b.title = 'Закрыть';
+                b.type = 'button'; b.className = 'flash-close'; b.setAttribute('aria-label', 'Закрыть');
+                b.innerHTML = '<i class="ti ti-x" aria-hidden="true"></i>';
                 b.addEventListener('click', function () { hideFlash(el); });
                 el.appendChild(b);
                 setTimeout(function () { hideFlash(el); }, 120000);
