@@ -2,8 +2,93 @@
 {% block title %}Movie radar{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
 <style>
-    .actions {
+    /* ═══ Панель поиска и фильтров ═══ */
+    .filter-bar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+
+    .search-box {
+        position: relative;
+        flex: 1;
+        min-width: 180px;
+        max-width: 320px;
+    }
+
+    .search-box i {
+        position: absolute;
+        left: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-faint);
+        font-size: 15px;
+        pointer-events: none;
+    }
+
+    .search-box input {
+        width: 100%;
+        padding-left: 36px;
+    }
+
+    .search-box .clear-btn {
+        position: absolute;
+        right: 6px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: none;
+        border: 0;
+        color: var(--text-muted);
+        cursor: pointer;
+        padding: 4px;
+        display: none;
+        font-size: 15px;
+    }
+
+    .search-box.has-value .clear-btn {
+        display: block;
+    }
+
+    .chip-row {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+
+    .chip {
+        padding: 7px 14px;
+        border-radius: 999px;
+        border: 1px solid var(--border-light);
+        background: var(--bg-card);
+        color: var(--text-muted);
+        font-size: 13px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        transition: .15s;
+    }
+
+    .chip i {
+        font-size: 14px;
+    }
+
+    .chip:hover {
+        border-color: var(--c1);
+    }
+
+    .chip.active {
+        background: var(--accent-bg);
+        border-color: var(--accent);
+        color: var(--accent-text);
+        font-weight: 600;
+    }
+
+    .actions-bar {
         display: flex;
         gap: 8px;
         flex-wrap: wrap;
@@ -11,45 +96,26 @@
         margin-bottom: 16px;
     }
 
-    .toolbar {
+    .actions-bar button.secondary,
+    .actions-bar .sort-select {
         display: flex;
+        align-items: center;
         gap: 6px;
-        margin-bottom: 16px;
-        flex-wrap: wrap;
     }
 
-    .toolbar a {
-        padding: 6px 14px;
-        border-radius: 999px;
-        text-decoration: none;
-        background: var(--bg-card);
-        color: var(--text-muted);
-        font-size: 14px;
-        border: 1px solid var(--border);
-        backdrop-filter: blur(10px);
-        transition: .15s;
+    .sort-select {
+        margin-left: auto;
     }
 
-    .toolbar a.active {
-        background: linear-gradient(90deg, var(--c1), var(--c3));
-        color: #04151a;
-        border-color: transparent;
-        font-weight: 600;
-    }
-
-    .toolbar a:hover:not(.active) {
-        border-color: var(--c1);
-    }
-
+    /* ═══ Сетка карточек ═══ */
     .grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
         gap: 16px;
-        align-items: stretch;
+        align-items: start;
     }
 
     .card {
-        position: relative;
         background: var(--bg-card);
         backdrop-filter: blur(16px);
         border: 1px solid var(--border);
@@ -57,67 +123,36 @@
         overflow: hidden;
         display: flex;
         flex-direction: column;
-        transition: .22s;
+        transition: border-color .15s, box-shadow .15s;
         min-width: 0;
     }
 
     .card:hover {
-        transform: translateY(-4px);
         border-color: var(--c1);
-        box-shadow: 0 0 30px rgba(45, 212, 191, .20), 0 0 10px rgba(125, 211, 252, .12);
     }
 
     .card.local {
-        border: 1px dashed var(--accent);
+        border-style: dashed;
+        border-color: var(--accent);
     }
 
-    .card-new {
-        animation: card-highlight 2s ease-in-out infinite;
+    .card.is-new {
+        border-color: var(--success);
+        box-shadow: 0 0 0 1px var(--success);
     }
 
-    @keyframes card-highlight {
-
-        0%,
-        100% {
-            box-shadow: 0 0 0 3px rgba(45, 212, 191, .4);
-        }
-
-        50% {
-            box-shadow: 0 0 0 6px rgba(45, 212, 191, .6), 0 0 20px rgba(45, 212, 191, .3);
-        }
+    .card.is-hidden {
+        display: none;
     }
 
-    /* ── Флип-постер ── */
-    .flip {
-        perspective: 1000px;
-        width: 100%;
-        aspect-ratio: 2/3;
-        cursor: pointer;
-    }
-
-    .flip-inner {
+    /* ── Постер ── */
+    .poster {
         position: relative;
         width: 100%;
-        height: 100%;
-        transition: transform .5s;
-        transform-style: preserve-3d;
+        aspect-ratio: 2/3;
     }
 
-    .flip.flipped .flip-inner {
-        transform: rotateY(180deg);
-    }
-
-    .flip-front,
-    .flip-back {
-        position: absolute;
-        inset: 0;
-        overflow: hidden;
-        backface-visibility: hidden;
-        -webkit-backface-visibility: hidden;
-    }
-
-    .flip-front img,
-    .flip-front .no-poster {
+    .poster img {
         width: 100%;
         height: 100%;
         object-fit: cover;
@@ -125,148 +160,32 @@
     }
 
     .no-poster {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: linear-gradient(150deg, rgba(45, 212, 191, .17), rgba(125, 211, 252, .14), rgba(52, 211, 153, .11));
-        color: var(--no-poster-text);
-    }
-
-    .flip-back {
-        transform: rotateY(180deg);
-        background: rgba(255, 255, 255, .08);
-        backdrop-filter: blur(20px);
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        padding: 10px;
-        border: 1px solid var(--border-light);
-    }
-
-    .flip-actions {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        min-width: 0;
-    }
-
-    .source-back {
-        align-self: flex-start;
-        margin-top: auto;
-        background: rgba(0, 0, 0, .5);
-        color: #fff;
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-size: 11px;
-    }
-
-    .flip-btn {
         width: 100%;
-        padding: 10px 8px;
-        border-radius: var(--radius-sm);
-        font-size: 13px;
-        background: transparent;
-        cursor: pointer;
+        height: 100%;
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 6px;
-        border: 1px solid;
-        font-weight: 600;
-        transition: background .15s, filter .15s;
-        white-space: nowrap;
-        text-decoration: none;
-        backdrop-filter: blur(10px);
-        min-width: 0;
+        background: linear-gradient(150deg, rgba(59, 130, 246, .16), rgba(96, 165, 250, .1));
+        color: var(--no-poster-text);
+        font-size: 28px;
     }
 
-    .flip-btn:hover {
-        filter: brightness(1.25);
-        background: rgba(255, 255, 255, .08);
-    }
-
-    .flip-btn:disabled {
-        opacity: .35;
-        cursor: not-allowed;
-    }
-
-    .btn-blue {
-        border-color: var(--c3);
-        color: var(--c3);
-    }
-
-    .btn-red {
-        border-color: var(--error);
-        color: var(--error);
-    }
-
-    .btn-orange {
-        border-color: #f5a623;
-        color: #f5a623;
-    }
-
-    .btn-green {
-        border-color: var(--success);
-        color: var(--success);
-    }
-
-    .btn-purple {
-        border-color: #b07ce8;
-        color: #b07ce8;
-    }
-
-    .count-badge {
-        margin-left: 4px;
-        background: var(--error);
-        color: #fff;
-        border-radius: 999px;
-        padding: 0 7px;
-        font-size: 11px;
-        line-height: 16px;
-        display: inline-block;
-    }
-
-    .poster-icons {
+    .poster-top {
         position: absolute;
         top: 6px;
+        left: 6px;
         right: 6px;
         display: flex;
-        gap: 4px;
-        z-index: 4;
-        align-items: center;
-        max-width: calc(100% - 12px);
-    }
-
-    .icon-btn {
-        width: 28px;
-        height: 28px;
-        border-radius: 50%;
-        border: 0;
-        cursor: pointer;
-        background: rgba(0, 0, 0, .6);
-        color: #fff;
-        font-size: 14px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: background .15s;
-        backdrop-filter: blur(8px);
-        flex-shrink: 0;
-    }
-
-    .icon-btn:hover {
-        background: rgba(0, 0, 0, .85);
-    }
-
-    .icon-btn.bell.off {
-        opacity: .55;
-        filter: grayscale(1);
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 6px;
+        z-index: 2;
     }
 
     .new-dot {
-        min-width: 20px;
-        height: 20px;
-        padding: 0 5px;
+        min-width: 22px;
+        height: 22px;
+        padding: 0 6px;
         border-radius: 999px;
         background: var(--error);
         color: #fff;
@@ -275,69 +194,82 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        box-shadow: 0 0 0 2px rgba(0, 0, 0, .4);
         flex-shrink: 0;
+    }
+
+    .icon-btn {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        border: 0;
+        cursor: pointer;
+        background: rgba(10, 10, 14, .6);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background .15s;
+        flex-shrink: 0;
+        font-size: 15px;
+        margin-left: auto;
+    }
+
+    .icon-btn:hover {
+        background: rgba(10, 10, 14, .85);
+    }
+
+    .icon-btn.bell-off {
+        opacity: .6;
     }
 
     .poster-badge {
         position: absolute;
-        padding: 3px 8px;
+        left: 6px;
+        bottom: 6px;
+        padding: 3px 9px;
         border-radius: 8px;
         font-size: 11px;
         font-weight: 600;
-        z-index: 2;
+        z-index: 1;
         max-width: calc(100% - 12px);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        display: flex;
+        align-items: center;
+        gap: 4px;
     }
 
+    .poster-badge.soon,
     .poster-badge.next {
-        left: 6px;
-        bottom: 6px;
-        background: rgba(45, 212, 191, .95);
-        color: #04231f;
+        background: rgba(59, 130, 246, .95);
+        color: #04101f;
     }
 
-    .poster-badge.soon {
-        left: 6px;
-        bottom: 6px;
-        background: rgba(45, 212, 191, .95);
-        color: #04231f;
-    }
-
-    .poster-badge.out {
-        left: 6px;
-        bottom: 6px;
-        background: rgba(245, 166, 35, .92);
-        color: #10131a;
-    }
-
+    .poster-badge.out,
     .poster-badge.airing {
-        right: 6px;
-        bottom: 6px;
         background: rgba(110, 231, 183, .95);
         color: #072b1a;
     }
 
     .poster-badge.finished {
-        left: 6px;
-        bottom: 6px;
-        background: rgba(10, 12, 18, .75);
+        background: rgba(10, 12, 18, .8);
         color: #9aa1b0;
     }
 
+    /* ── Инфо ── */
     .info {
-        padding: 12px 12px 8px;
-        flex: 1 1 auto;
-        min-width: 0;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex: 1;
     }
 
     .card h2 {
         font-size: 15px;
         line-height: 1.4;
-        margin: 0 0 6px;
-        min-height: 2.8em;
+        margin: 0;
         font-weight: 600;
         overflow: hidden;
         display: -webkit-box;
@@ -355,8 +287,6 @@
         display: flex;
         gap: 4px;
         flex-wrap: wrap;
-        margin-bottom: 6px;
-        min-height: 1.6em;
     }
 
     .tag {
@@ -373,11 +303,12 @@
     }
 
     .seasons-link {
-        display: block;
+        display: flex;
+        align-items: center;
+        gap: 5px;
         color: var(--accent);
         text-decoration: none;
         font-size: 13px;
-        min-height: 1.6em;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -391,7 +322,6 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        margin-top: 8px;
     }
 
     .watch-bar {
@@ -400,7 +330,6 @@
         border-radius: 2px;
         background: var(--progress-bg);
         overflow: hidden;
-        min-width: 0;
     }
 
     .watch-fill {
@@ -414,22 +343,132 @@
         white-space: nowrap;
     }
 
-    .flip-hint {
-        color: var(--text-faint);
-        font-size: 11px;
+    /* ── Меню действий (details/summary — работает без JS) ── */
+    .card-menu {
+        margin-top: auto;
+    }
+
+    .card-menu summary {
+        list-style: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 8px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border-light);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+        transition: border-color .15s, background .15s;
+    }
+
+    .card-menu summary::-webkit-details-marker {
+        display: none;
+    }
+
+    .card-menu summary:hover {
+        border-color: var(--c1);
+        background: var(--bg-hover);
+    }
+
+    .card-menu[open] summary i.ti-dots {
+        display: none;
+    }
+
+    .card-menu summary i.ti-chevron-up {
+        display: none;
+        font-size: 14px;
+    }
+
+    .card-menu[open] summary i.ti-chevron-up {
+        display: inline-block;
+    }
+
+    .menu-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
         margin-top: 6px;
+    }
+
+    .menu-panel form {
+        display: contents;
+    }
+
+    .menu-btn {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 9px 10px;
+        border-radius: var(--radius-sm);
+        border: 0;
+        background: transparent;
+        color: var(--text);
+        font-size: 13px;
+        cursor: pointer;
+        text-align: left;
+        transition: background .15s;
+    }
+
+    .menu-btn:hover {
+        background: var(--bg-hover);
+    }
+
+    .menu-btn i {
+        font-size: 16px;
+        flex-shrink: 0;
+    }
+
+    .menu-btn.c-green i {
+        color: var(--success);
+    }
+
+    .menu-btn.c-blue i {
+        color: var(--c3);
+    }
+
+    .menu-btn.c-orange i {
+        color: #f5a623;
+    }
+
+    .menu-btn.c-purple i {
+        color: #b07ce8;
+    }
+
+    .menu-btn.c-red,
+    .menu-btn.c-red i {
+        color: var(--error);
+    }
+
+    .menu-btn .count-badge {
+        margin-left: auto;
+        background: var(--error);
+        color: #fff;
+        border-radius: 999px;
+        padding: 0 7px;
+        font-size: 11px;
+        line-height: 16px;
+    }
+
+    .menu-source {
+        font-size: 11px;
+        color: var(--text-dim);
+        padding: 4px 10px 0;
     }
 
     .empty {
         color: var(--text-muted);
-        margin-top: 20px;
+        margin-top: 8px;
     }
 
+    /* ═══ Прогресс массового обновления ═══ */
     #progress-wrap {
         display: none;
         margin-bottom: 16px;
         background: var(--bg-card);
-        backdrop-filter: blur(16px);
         border: 1px solid var(--border);
         border-radius: var(--radius);
         padding: 12px;
@@ -438,7 +477,7 @@
     #progress-wrap .bar-bg {
         background: var(--progress-bg);
         border-radius: 6px;
-        height: 12px;
+        height: 10px;
         overflow: hidden;
     }
 
@@ -455,13 +494,11 @@
         margin-top: 6px;
     }
 
+    /* ═══ Модалки (раздача + подтверждение) ═══ */
     .modal-overlay {
         display: none;
         position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
+        inset: 0;
         background: rgba(0, 0, 0, .7);
         backdrop-filter: blur(8px);
         z-index: 100;
@@ -476,7 +513,6 @@
 
     .modal {
         background: var(--bg-card);
-        backdrop-filter: blur(20px);
         border: 1px solid var(--border);
         border-radius: var(--radius);
         max-width: 560px;
@@ -501,7 +537,7 @@
     .modal-close {
         background: none;
         border: none;
-        font-size: 22px;
+        font-size: 20px;
         color: var(--text-muted);
         cursor: pointer;
         padding: 4px 8px;
@@ -605,7 +641,8 @@
         padding: 3px 0;
     }
 
-    .learn-actions {
+    .learn-actions,
+    .modal-actions {
         display: flex;
         gap: 8px;
         margin-top: 16px;
@@ -628,20 +665,55 @@
         color: #04151a;
     }
 
+    /* Подтверждение опасных действий */
+    .confirm-modal {
+        max-width: 380px;
+        padding: 20px;
+    }
+
+    .confirm-modal p {
+        font-size: 14px;
+        color: var(--text);
+        margin-bottom: 18px;
+        line-height: 1.5;
+    }
+
+    .confirm-modal .modal-actions button {
+        flex: 1;
+        padding: 10px;
+        border-radius: var(--radius-sm);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        border: 1px solid var(--border-light);
+        background: var(--bg-hover);
+        color: var(--text);
+    }
+
+    .confirm-modal .modal-actions button.danger {
+        border-color: var(--error);
+        background: var(--delete-btn-bg);
+        color: var(--error);
+    }
+
+    .confirm-modal .modal-actions button.danger:hover {
+        background: var(--delete-btn-hover);
+    }
+
     /* ═══ МОБИЛЬНАЯ ВЕРСИЯ ═══ */
     @media (max-width:700px) {
         .grid {
-            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
             gap: 10px;
         }
 
         .card h2 {
             font-size: 13px;
-            min-height: 2.6em;
         }
 
-        .year {
-            font-size: 11px;
+        .info {
+            padding: 8px;
+            gap: 6px;
         }
 
         .tag {
@@ -649,69 +721,36 @@
             padding: 2px 6px;
         }
 
-        .seasons-link {
-            font-size: 11px;
+        .card-menu summary {
+            font-size: 12px;
+            padding: 7px;
         }
 
-        .watch-text {
-            font-size: 10px;
-        }
-
-        .flip-hint {
-            display: none;
-        }
-
-        .flip-btn {
-            font-size: 11px;
-            padding: 8px 4px;
-            white-space: normal;
-            line-height: 1.2;
-        }
-
-        .count-badge {
-            font-size: 10px;
-        }
-
-        .poster-icons {
-            top: 4px;
-            right: 4px;
-            gap: 3px;
+        .menu-btn {
+            font-size: 12px;
+            padding: 8px;
         }
 
         .icon-btn {
-            width: 24px;
-            height: 24px;
-            font-size: 12px;
+            width: 26px;
+            height: 26px;
+            font-size: 13px;
         }
 
         .new-dot {
-            min-width: 16px;
-            height: 16px;
-            padding: 0 4px;
+            min-width: 18px;
+            height: 18px;
             font-size: 10px;
         }
 
         .poster-badge {
             font-size: 9px;
-            padding: 2px 6px;
+            padding: 2px 7px;
         }
 
-        .info {
-            padding: 8px 8px 6px;
-        }
-
-        .actions {
-            gap: 6px;
-        }
-
-        .actions .secondary {
-            padding: 8px 12px;
-            font-size: 12px;
-        }
-
-        .toolbar a {
-            padding: 5px 10px;
-            font-size: 12px;
+        .actions-bar .sort-select {
+            margin-left: 0;
+            width: 100%;
         }
     }
 
@@ -725,7 +764,7 @@
 {% endblock %}
 
 {% block content %}
-<h1 class="page-title">📋 Список</h1>
+<h1 class="page-title">Список</h1>
 
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 {% if message %}<p class="message">{{ message }}</p>{% endif %}
@@ -738,111 +777,92 @@
     <div class="bar-text" id="progress-text">Обновление...</div>
 </div>
 
-<div class="actions">
-    <form method="post" action="/refresh"><button class="secondary" type="submit">🔄 Обновить все даты</button></form>
-    <form method="post" action="/notify-all/on?sort={{ sort }}"><button class="secondary" type="submit">🔔 Все
-            вкл</button></form>
-    <form method="post" action="/notify-all/off?sort={{ sort }}"><button class="secondary" type="submit">🔕 Все
-            выкл</button></form>
+<div class="filter-bar">
+    <div class="search-box" id="search-box">
+        <i class="ti ti-search" aria-hidden="true"></i>
+        <input type="text" id="search-input" placeholder="Найти по названию" aria-label="Поиск по названию">
+        <button type="button" class="clear-btn" id="search-clear" aria-label="Очистить поиск"><i
+                class="ti ti-x"></i></button>
+    </div>
+    <div class="chip-row" id="type-filter" role="group" aria-label="Фильтр по типу">
+        <button type="button" class="chip active" data-filter="all">Все</button>
+        <button type="button" class="chip" data-filter="series"><i class="ti ti-device-tv"
+                aria-hidden="true"></i>Сериалы</button>
+        <button type="button" class="chip" data-filter="movie"><i class="ti ti-movie"
+                aria-hidden="true"></i>Фильмы</button>
+        <button type="button" class="chip" data-filter="new"><i class="ti ti-sparkles" aria-hidden="true"></i>С
+            новинками</button>
+    </div>
 </div>
 
-<div class="toolbar">
-    <a href="/?sort=date" class="{% if sort == 'date' %}active{% endif %}">📅 По дате выхода</a>
-    <a href="/?sort=title" class="{% if sort == 'title' %}active{% endif %}">🔤 По названию</a>
-    <a href="/?sort=genre" class="{% if sort == 'genre' %}active{% endif %}">🎭 По жанру</a>
+<div class="actions-bar">
+    <form method="post" action="/refresh"><button class="secondary" type="submit"><i class="ti ti-refresh"
+                aria-hidden="true"></i>Обновить все даты</button></form>
+    <form method="post" action="/notify-all/on?sort={{ sort }}"><button class="secondary" type="submit"><i
+                class="ti ti-bell" aria-hidden="true"></i>Все вкл</button></form>
+    <form method="post" action="/notify-all/off?sort={{ sort }}"><button class="secondary" type="submit"><i
+                class="ti ti-bell-off" aria-hidden="true"></i>Все выкл</button></form>
+    <div class="sort-select">
+        <select id="sort-select" aria-label="Сортировка" onchange="window.location.href='/?sort=' + this.value">
+            <option value="date" {% if sort=='date' %}selected{% endif %}>По дате выхода</option>
+            <option value="title" {% if sort=='title' %}selected{% endif %}>По названию</option>
+            <option value="genre" {% if sort=='genre' %}selected{% endif %}>По жанру</option>
+        </select>
+    </div>
 </div>
 
-<div class="grid">
+<div class="grid" id="cards-grid">
     {% for c in cards %}
-    <article class="card {{ 'local' if c.source == 'local' else '' }}" {% if c.updated_at
+    <article class="card {{ 'local' if c.source == 'local' else '' }}" data-title="{{ c.title|lower|e }}"
+        data-type="{{ c.type }}" data-hasnew="{{ 1 if c.show_dot else 0 }}" {% if c.updated_at
         %}title="обновлено: {{ c.updated_at }}" {% endif %}>
 
-        <div class="flip" data-id="{{ c.external_id }}">
-            <div class="flip-inner">
-                <div class="flip-front">
-                    {% if c.display_poster %}<img src="{{ c.display_poster }}" alt="{{ c.title }}" loading="lazy">
-                    {% else %}<div class="no-poster">нет постера</div>{% endif %}
+        <div class="poster">
+            {% if c.display_poster %}<img src="{{ c.display_poster }}" alt="{{ c.title }}" loading="lazy">
+            {% else %}<div class="no-poster"><i class="ti ti-photo-off" aria-hidden="true"></i></div>{% endif %}
 
-                    <div class="poster-icons">
-                        {% if c.show_dot %}<span class="new-dot" title="Новые эпизоды: {{ c.new_count }}">{{ c.new_count
-                            }}</span>{% endif %}
-                        <form method="post" action="/toggle-notify/{{ c.external_id }}?sort={{ sort }}">
-                            <button class="icon-btn bell {{ '' if c.notify_enabled else 'off' }}" type="submit"
-                                title="{{ 'Выключить уведомления' if c.notify_enabled else 'Включить уведомления' }}">
-                                {{ '🔔' if c.notify_enabled else '🔕' }}
-                            </button>
-                        </form>
-                    </div>
-
-                    {% if c.type == 'series' %}
-                    {% if c.next_episode_short %}
-                    <span class="poster-badge next">📺 След. серия: {{ c.next_episode_short }}</span>
-                    <span class="poster-badge airing">Выходит</span>
-                    {% elif c.tmdb_status in ('Ended', 'Canceled') %}
-                    <span class="poster-badge finished">Завершён</span>
-                    {% else %}
-                    <span class="poster-badge airing">Выходит</span>
-                    {% endif %}
-                    {% else %}
-                    {% if c.badge %}<span class="poster-badge {{ 'out' if c.released else 'soon' }}">{{ c.badge
-                        }}</span>{% endif %}
-                    {% endif %}
-                </div>
-
-                <div class="flip-back">
-                    <div class="flip-actions">
-                        {% if c.has_distribution %}
-                        <form method="post" action="/distribution/download/{{ c.external_id }}?sort={{ sort }}"
-                            class="js-download-form" data-title="{{ c.title|e }}">
-                            <button class="flip-btn btn-green" type="submit">
-                                ⬇ Скачать торрент{% if c.show_badge %}<span class="count-badge">{{ c.new_count
-                                    }}</span>{% endif %}
-                            </button>
-                        </form>
-                        {% else %}
-                        <button class="flip-btn btn-purple js-dist-btn" type="button" data-id="{{ c.external_id }}"
-                            data-title="{{ c.title|e }}" data-has="false">
-                            🎬 Добавить раздачу
-                        </button>
-                        {% endif %}
-
-                        {% if c.source != 'local' %}
-                        <form method="post" action="/refresh/{{ c.external_id }}?sort={{ sort }}">
-                            <button class="flip-btn btn-blue" type="submit">🔄 Обновить информацию</button>
-                        </form>
-                        {% endif %}
-
-                        {% if c.has_distribution %}
-                        <button class="flip-btn btn-purple js-dist-btn" type="button" data-id="{{ c.external_id }}"
-                            data-title="{{ c.title|e }}" data-has="true" data-url="{{ (c.distribution_url or '')|e }}"
-                            data-path="{{ (c.distribution_download_path or '')|e }}"
-                            data-mode="{{ (c.distribution_mode or 'smart')|e }}"
-                            data-interval="{{ c.distribution_check_interval_hours or 6 }}">
-                            🎬 Изменить раздачу
-                        </button>
-                        <form method="post" action="/distribution/check/{{ c.external_id }}?sort={{ sort }}">
-                            <button class="flip-btn btn-orange" type="submit">⟳ Проверить обновление</button>
-                        </form>
-                        {% endif %}
-
-                        <form method="post" action="/delete/{{ c.external_id }}?sort={{ sort }}">
-                            <button class="flip-btn btn-red" type="submit">🗑 Удалить</button>
-                        </form>
-                    </div>
-                    <span class="source-back">{{ c.source }}</span>
-                </div>
+            <div class="poster-top">
+                {% if c.show_dot %}<span class="new-dot" title="Новые эпизоды: {{ c.new_count }}">{{ c.new_count
+                    }}</span>{% endif %}
+                <form method="post" action="/toggle-notify/{{ c.external_id }}?sort={{ sort }}">
+                    <button class="icon-btn {{ '' if c.notify_enabled else 'bell-off' }}" type="submit"
+                        aria-label="{{ 'Выключить уведомления' if c.notify_enabled else 'Включить уведомления' }}"
+                        aria-pressed="{{ 'true' if c.notify_enabled else 'false' }}">
+                        <i class="ti {{ 'ti-bell' if c.notify_enabled else 'ti-bell-off' }}" aria-hidden="true"></i>
+                    </button>
+                </form>
             </div>
+
+            {% if c.type == 'series' %}
+            {% if c.next_episode_short %}
+            <span class="poster-badge next"><i class="ti ti-player-play" aria-hidden="true"></i>{{ c.next_episode_short
+                }}</span>
+            {% elif c.tmdb_status in ('Ended', 'Canceled') %}
+            <span class="poster-badge finished">Завершён</span>
+            {% else %}
+            <span class="poster-badge airing">Выходит</span>
+            {% endif %}
+            {% else %}
+            {% if c.badge %}<span class="poster-badge {{ 'out' if c.released else 'soon' }}">{{ c.badge }}</span>{%
+            endif %}
+            {% endif %}
         </div>
 
         <div class="info">
             <h2>{{ c.title }}{% if c.year %} <span class="year">({{ c.year }})</span>{% endif %}</h2>
+
             {% if c.genres_list %}
             <div class="tags">{% for g in c.genres_list %}<span class="tag">{{ g }}</span>{% endfor %}</div>
             {% endif %}
+
             {% if c.type == 'series' %}
-            <a class="seasons-link" href="/title/{{ c.external_id }}">📺 {{ c.season_count or 0 }} сезон(ов){% if
-                c.next_season_date_human %} · следующий: {{ c.next_season_date_human }}{% endif %}</a>
+            <a class="seasons-link" href="/title/{{ c.external_id }}">
+                <i class="ti ti-device-tv" aria-hidden="true"></i>
+                {{ c.season_count or 0 }} сезон(ов){% if c.next_season_date_human %} · след.: {{
+                c.next_season_date_human }}{% endif %}
+            </a>
             {% endif %}
+
             {% if c.watch_total %}
             <div class="watch-row">
                 <div class="watch-bar">
@@ -851,7 +871,58 @@
                 <span class="watch-text">{{ c.watch_label }}</span>
             </div>
             {% endif %}
-            <div class="flip-hint">Нажмите на постер, чтобы открыть действия</div>
+
+            <details class="card-menu">
+                <summary>
+                    <i class="ti ti-dots" aria-hidden="true"></i>
+                    <i class="ti ti-chevron-up" aria-hidden="true"></i>
+                    Действия
+                </summary>
+                <div class="menu-panel">
+                    {% if c.has_distribution %}
+                    <form method="post" action="/distribution/download/{{ c.external_id }}?sort={{ sort }}"
+                        data-confirm="Отправить раздачу «{{ c.title|e }}» в клиент загрузок? Скачивание начнётся сразу.">
+                        <button class="menu-btn c-green" type="submit">
+                            <i class="ti ti-download" aria-hidden="true"></i>Скачать торрент
+                            {% if c.show_badge %}<span class="count-badge">{{ c.new_count }}</span>{% endif %}
+                        </button>
+                    </form>
+                    {% else %}
+                    <button class="menu-btn c-purple js-dist-btn" type="button" data-id="{{ c.external_id }}"
+                        data-title="{{ c.title|e }}" data-has="false">
+                        <i class="ti ti-movie" aria-hidden="true"></i>Добавить раздачу
+                    </button>
+                    {% endif %}
+
+                    {% if c.source != 'local' %}
+                    <form method="post" action="/refresh/{{ c.external_id }}?sort={{ sort }}">
+                        <button class="menu-btn c-blue" type="submit"><i class="ti ti-refresh"
+                                aria-hidden="true"></i>Обновить информацию</button>
+                    </form>
+                    {% endif %}
+
+                    {% if c.has_distribution %}
+                    <button class="menu-btn c-purple js-dist-btn" type="button" data-id="{{ c.external_id }}"
+                        data-title="{{ c.title|e }}" data-has="true" data-url="{{ (c.distribution_url or '')|e }}"
+                        data-path="{{ (c.distribution_download_path or '')|e }}"
+                        data-mode="{{ (c.distribution_mode or 'smart')|e }}"
+                        data-interval="{{ c.distribution_check_interval_hours or 6 }}">
+                        <i class="ti ti-edit" aria-hidden="true"></i>Изменить раздачу
+                    </button>
+                    <form method="post" action="/distribution/check/{{ c.external_id }}?sort={{ sort }}">
+                        <button class="menu-btn c-orange" type="submit"><i class="ti ti-reload"
+                                aria-hidden="true"></i>Проверить обновление</button>
+                    </form>
+                    {% endif %}
+
+                    <form method="post" action="/delete/{{ c.external_id }}?sort={{ sort }}"
+                        data-confirm="Удалить «{{ c.title|e }}» из каталога? Это действие нельзя отменить.">
+                        <button class="menu-btn c-red" type="submit"><i class="ti ti-trash"
+                                aria-hidden="true"></i>Удалить</button>
+                    </form>
+                    <div class="menu-source">источник: {{ c.source }}</div>
+                </div>
+            </details>
         </div>
     </article>
     {% else %}
@@ -859,17 +930,21 @@
     {% endfor %}
 </div>
 
+<p class="empty" id="no-results" style="display:none">Ничего не найдено по вашему запросу.</p>
+
+<!-- Модалка раздачи -->
 <div class="modal-overlay" id="dist-modal">
     <div class="modal">
         <div class="modal-header">
             <h3 id="dist-modal-title">Добавить раздачу</h3>
-            <button class="modal-close" id="dist-modal-close">×</button>
+            <button class="modal-close" id="dist-modal-close" aria-label="Закрыть"><i class="ti ti-x"></i></button>
         </div>
 
         <div class="modal-tabs">
-            <button type="button" class="mtab active" data-tab="main">🎬 Раздача</button>
-            <button type="button" class="mtab" data-tab="learn" id="learn-tab-btn" style="display:none">🧠
-                Обучение</button>
+            <button type="button" class="mtab active" data-tab="main"><i class="ti ti-movie" aria-hidden="true"></i>
+                Раздача</button>
+            <button type="button" class="mtab" data-tab="learn" id="learn-tab-btn" style="display:none"><i
+                    class="ti ti-brain" aria-hidden="true"></i> Обучение</button>
         </div>
 
         <div class="modal-body">
@@ -929,9 +1004,20 @@
 
                 <div class="learn-actions">
                     <button type="submit" form="learn-form" class="learn-btn">Сохранить обучение</button>
-                    <button type="submit" form="learn-reset-form" class="learn-btn">🗑 Сбросить обучение</button>
+                    <button type="submit" form="learn-reset-form" class="learn-btn">Сбросить обучение</button>
                 </div>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модалка подтверждения опасных действий (замена confirm()) -->
+<div class="modal-overlay" id="confirm-overlay">
+    <div class="modal confirm-modal">
+        <p id="confirm-message"></p>
+        <div class="modal-actions">
+            <button type="button" id="confirm-cancel">Отмена</button>
+            <button type="button" id="confirm-ok" class="danger">Подтвердить</button>
         </div>
     </div>
 </div>
@@ -939,6 +1025,7 @@
 
 {% block extra_js %}
 <script>
+    /* ── Подсветка недавно добавленной карточки ── */
     (function () {
         const url = new URL(window.location.href);
         const newId = url.searchParams.get('new');
@@ -946,16 +1033,50 @@
         url.searchParams.delete('new');
         window.history.replaceState({}, '', url.toString());
         document.querySelectorAll('.card').forEach(function (card) {
-            const flip = card.querySelector('.flip');
-            if (flip && flip.dataset.id === newId) {
-                card.classList.add('card-new');
-                flip.addEventListener('click', function () {
-                    card.classList.remove('card-new');
-                }, { once: true });
-            }
+            const btn = card.querySelector('[data-id="' + newId + '"], .icon-btn');
+            if (card.querySelector('form[action*="' + newId + '"]')) card.classList.add('is-new');
         });
     })();
 
+    /* ── Поиск и фильтры по типу (клиентские, без похода на сервер) ── */
+    (function () {
+        const input = document.getElementById('search-input');
+        const clearBtn = document.getElementById('search-clear');
+        const box = document.getElementById('search-box');
+        const chips = document.querySelectorAll('#type-filter .chip');
+        const cards = document.querySelectorAll('#cards-grid .card');
+        const noResults = document.getElementById('no-results');
+        let activeFilter = 'all';
+
+        function apply() {
+            const q = input.value.trim().toLowerCase();
+            box.classList.toggle('has-value', q.length > 0);
+            let visibleCount = 0;
+            cards.forEach(function (card) {
+                const matchesText = !q || card.dataset.title.includes(q);
+                let matchesFilter = true;
+                if (activeFilter === 'series' || activeFilter === 'movie') matchesFilter = card.dataset.type === activeFilter;
+                if (activeFilter === 'new') matchesFilter = card.dataset.hasnew === '1';
+                const show = matchesText && matchesFilter;
+                card.classList.toggle('is-hidden', !show);
+                if (show) visibleCount++;
+            });
+            noResults.style.display = visibleCount === 0 ? 'block' : 'none';
+        }
+
+        input.addEventListener('input', apply);
+        clearBtn.addEventListener('click', function () { input.value = ''; apply(); input.focus(); });
+        chips.forEach(function (chip) {
+            chip.addEventListener('click', function () {
+                chips.forEach(c => c.classList.remove('active'));
+                chip.classList.add('active');
+                activeFilter = chip.dataset.filter;
+                apply();
+            });
+        });
+    })();
+
+    /* ── Прогресс массового обновления ── */
     const patternsData = {{ patterns_json | safe }};
     const CONF_RU = { low: 'низкая', medium: 'средняя', high: 'высокая' };
 
@@ -981,6 +1102,7 @@
     }
     pollProgress();
 
+    /* ── Модалка раздачи ── */
     const distModal = document.getElementById('dist-modal');
 
     function switchTab(name) {
@@ -1041,36 +1163,53 @@
         const btn = e.target.closest('.js-dist-btn');
         if (btn) { e.preventDefault(); openDistModal(btn); return; }
 
-        const flip = e.target.closest('.flip');
-        if (flip) {
-            if (e.target.closest('a') || e.target.closest('button')) return;
-            const toBack = !flip.classList.contains('flipped');
-            flip.classList.toggle('flipped');
-            if (toBack) {
-                const dot = flip.querySelector('.new-dot');
-                if (dot) {
-                    dot.remove();
-                    fetch('/distribution/seen/' + encodeURIComponent(flip.dataset.id), { method: 'POST' });
-                }
-            }
-            return;
-        }
-
         const tab = e.target.closest('.mtab');
         if (tab) { switchTab(tab.dataset.tab); }
+
+        // закрываем открытые details-меню при клике вне их
+        document.querySelectorAll('.card-menu[open]').forEach(function (d) {
+            if (!d.contains(e.target)) d.removeAttribute('open');
+        });
     });
 
     document.getElementById('dist-modal-close').addEventListener('click', closeDistModal);
     document.getElementById('dist-modal-cancel').addEventListener('click', closeDistModal);
     distModal.addEventListener('click', function (e) { if (e.target === distModal) closeDistModal(); });
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDistModal(); });
+
+    /* ── Кастомное подтверждение вместо confirm() ── */
+    const confirmOverlay = document.getElementById('confirm-overlay');
+    const confirmMessage = document.getElementById('confirm-message');
+    const confirmOk = document.getElementById('confirm-ok');
+    const confirmCancel = document.getElementById('confirm-cancel');
+    let pendingForm = null;
 
     document.addEventListener('submit', function (e) {
-        const form = e.target.closest('.js-download-form');
-        if (form) {
-            const name = form.dataset.title || '';
-            if (!confirm(`Отправить раздачу «${name}» в клиент загрузок?\n\nСкачивание начнётся сразу (согласно настройкам).`)) e.preventDefault();
+        const form = e.target;
+        if (form.dataset.confirm) {
+            e.preventDefault();
+            pendingForm = form;
+            confirmMessage.textContent = form.dataset.confirm;
+            confirmOverlay.classList.add('open');
         }
+    });
+
+    confirmOk.addEventListener('click', function () {
+        confirmOverlay.classList.remove('open');
+        if (pendingForm) { pendingForm.submit(); pendingForm = null; }
+    });
+    confirmCancel.addEventListener('click', function () {
+        confirmOverlay.classList.remove('open');
+        pendingForm = null;
+    });
+    confirmOverlay.addEventListener('click', function (e) {
+        if (e.target === confirmOverlay) { confirmOverlay.classList.remove('open'); pendingForm = null; }
+    });
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') return;
+        closeDistModal();
+        confirmOverlay.classList.remove('open');
+        pendingForm = null;
     });
 </script>
 {% endblock %}
