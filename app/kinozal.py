@@ -1,4 +1,3 @@
-import json
 import re
 from typing import Optional
 
@@ -57,7 +56,10 @@ class KinozalClient:
             return False, f"HTTP {r.status_code}, redirect to {r.url}"
 
     async def fetch_files(self, torrent_id: str, cookies: dict = None) -> list:
+        """Получает список файлов раздачи через AJAX-эндпоинт."""
         effective_cookies = cookies if cookies is not None else self.cookies
+        
+        # Сначала проверяем доступность основной страницы (сессия)
         async with httpx.AsyncClient(proxy=get_proxy_url(), timeout=30) as client:
             r = await client.get(f"{self.BASE_URL}/details.php?id={torrent_id}",
                                  headers=self._headers(), cookies=effective_cookies)
@@ -65,14 +67,57 @@ class KinozalClient:
                 raise KinozalForbiddenError("403 Forbidden")
             if r.status_code != 200:
                 raise KinozalError(f"HTTP {r.status_code}")
+            
+            # Список файлов загружается отдельным AJAX-запросом
+            # get_srv_details.php?id=X&action=2 возвращает HTML со списком файлов
+            details_url = f"{self.BASE_URL}/get_srv_details.php?id={torrent_id}&action=2"
+            r = await client.get(details_url, headers={
+                **self._headers(),
+                "Referer": f"{self.BASE_URL}/details.php?id={torrent_id}",
+                "X-Requested-With": "XMLHttpRequest",
+            }, cookies=effective_cookies)
+            
+            if r.status_code != 200:
+                raise KinozalError(f"HTTP {r.status_code} при получении списка файлов")
+            
+            # Явно указываем кодировку windows-1251 (не UTF-8!)
+            r.encoding = "cp1251"
             html = r.text
+            
             files = []
-            for m in re.finditer(r'<a href="/download\.php\?id=(\d+)"[^>]*>([^<]+)</a>', html):
-                files.append({"name": m.group(2).strip(), "size": 0, "url": f"{self.BASE_URL}/download.php?id={m.group(1)}"})
+            
+            # Парсим строки таблицы вида: <tr class='float'><td class='s'>имя.mkv</td><td class='s'>размер</td>...
+            # Или строки с файлами в таблице без класса float
+            for m in re.finditer(
+                r'<tr[^>]*>\s*<td[^>]*>([^<]+?)</td>\s*<td[^>]*>([\d.]+\s*[КMГT]Б)</td>',
+                html, re.IGNORECASE | re.DOTALL
+            ):
+                name = m.group(1).strip()
+                size = self._parse_size(m.group(2).strip())
+                # Фильтруем только файлы с расширениями медиа
+                if any(name.lower().endswith(ext) for ext in ('.mkv', '.mp4', '.avi', '.ts', '.m2ts', '.srt', '.sub', '.idx', '.nfo', '.jpg')):
+                    files.append({"name": name, "size": size, "url": ""})
+            
+            # Fallback: ищем в основной странице, если AJAX не сработал
             if not files:
-                # Fallback: ищем в тексте раздачи
-                for m in re.finditer(r'<td class="s">\s*([^<]+?)\s*</td>\s*<td class="s">\s*([\d.]+\s*[КMG]Б)\s*</td>', html):
-                    files.append({"name": m.group(1).strip(), "size": self._parse_size(m.group(2)), "url": ""})
+                r2 = await client.get(f"{self.BASE_URL}/details.php?id={torrent_id}",
+                                      headers=self._headers(), cookies=effective_cookies)
+                r2.encoding = "cp1251"
+                html2 = r2.text
+                
+                # Сохраняем дамп для диагностики
+                try:
+                    with open(f"/data/debug_kinozal_{torrent_id}.html", "w", encoding="utf-8") as f:
+                        f.write(html2)
+                except Exception:
+                    pass
+                
+                # Ищем файлы в "Содержании" — обычно идут списком с расширением .mkv
+                for m in re.finditer(r'([A-Za-zА-Яа-я0-9_\-\.\s\(\)]+\.(?:mkv|mp4|avi|ts|m2ts))\s+([\d.]+\s*[КMГT]Б)', html2, re.IGNORECASE):
+                    name = m.group(1).strip()
+                    size = self._parse_size(m.group(2).strip())
+                    files.append({"name": name, "size": size, "url": ""})
+            
             return files
 
     async def download_torrent(self, torrent_id: str, cookies: dict = None) -> bytes:
@@ -113,7 +158,8 @@ class KinozalClient:
             return r.content
 
     def _parse_size(self, size_str: str) -> int:
-        m = re.match(r"([\d.]+)\s*([КMG])Б", size_str)
+        # Поддержка и кириллических (КБ, МБ, ГБ), и латинских (КБ, МБ, ГБ) сокращений
+        m = re.match(r"([\d.]+)\s*([КMГT])Б", size_str)
         if not m:
             return 0
         num, unit = float(m.group(1)), m.group(2)
@@ -121,6 +167,8 @@ class KinozalClient:
             return int(num * 1024)
         if unit == "M":
             return int(num * 1024 * 1024)
-        if unit == "G":
+        if unit in ("Г", "G"):
             return int(num * 1024 * 1024 * 1024)
+        if unit in ("Т", "T"):
+            return int(num * 1024 * 1024 * 1024 * 1024)
         return 0
