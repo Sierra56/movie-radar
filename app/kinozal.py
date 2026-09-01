@@ -3,7 +3,7 @@ import re
 import httpx
 
 from .core import get_proxy_url
-from .notify import notify_expired_cookies_async
+from .notify import notify_expired_cookies
 
 
 class KinozalError(Exception):
@@ -95,7 +95,6 @@ class KinozalClient:
         files = []
         seen = set()
 
-        # Вариант 1: таблица <tr><td>имя</td><td>размер</td></tr>
         for m in re.finditer(
             r'<tr[^>]*>\s*<td[^>]*>([^<]+?)</td>\s*<td[^>]*>([\d.,]+\s*[КMГTKMGT]Б?)</td>',
             html_text, re.IGNORECASE | re.DOTALL
@@ -106,7 +105,6 @@ class KinozalClient:
                 seen.add(name)
                 files.append({"name": name, "size": size, "url": ""})
 
-        # Вариант 2: имя файла + размер в одной строке
         for m in re.finditer(
             r'([A-Za-zА-Яа-яЁё0-9_\-\.\s\(\)\[\]&]+?\.(?:mkv|mp4|avi|ts|m2ts|srt|sub|idx|nfo|jpg))\s*(?:[\(\[])?\s*([\d.,]+)\s*([КMГTKMGT])Б',
             html_text, re.IGNORECASE
@@ -124,16 +122,14 @@ class KinozalClient:
         effective_cookies = cookies if cookies is not None else self.cookies
 
         async with httpx.AsyncClient(proxy=get_proxy_url(), timeout=30) as client:
-            # 1. Проверяем основную страницу (сессия)
             r = await client.get(f"{self.BASE_URL}/details.php?id={torrent_id}",
                                  headers=self._headers(), cookies=effective_cookies)
             if r.status_code == 403:
-                await notify_expired_cookies_async("kinozal")
+                await notify_expired_cookies("kinozal")
                 raise KinozalForbiddenError("403 Forbidden — обновите cookies kinozal.me")
             if r.status_code != 200:
                 raise KinozalError(f"HTTP {r.status_code} при загрузке details.php")
 
-            # 2. Список файлов через AJAX-эндпоинт
             details_url = f"{self.BASE_URL}/get_srv_details.php?id={torrent_id}&action=2"
             r = await client.get(details_url, headers={
                 **self._headers(),
@@ -142,19 +138,17 @@ class KinozalClient:
             }, cookies=effective_cookies)
 
             if r.status_code == 403:
-                await notify_expired_cookies_async("kinozal")
+                await notify_expired_cookies("kinozal")
                 raise KinozalForbiddenError("403 Forbidden при получении списка файлов")
             if r.status_code != 200:
                 raise KinozalError(f"HTTP {r.status_code} при получении списка файлов")
 
-            # Явно указываем кодировку ДО чтения текста
             r.encoding = "cp1251"
             ajax_html = r.text
             self._save_dump(torrent_id, "ajax", ajax_html)
 
             files = self._parse_files_from_html(ajax_html)
 
-            # 3. Fallback — основная страница
             if not files:
                 r_main = await client.get(f"{self.BASE_URL}/details.php?id={torrent_id}",
                                           headers=self._headers(), cookies=effective_cookies)
@@ -181,23 +175,23 @@ class KinozalClient:
                                              headers=self._headers(), cookies=new_cookies, follow_redirects=True)
                         content_type = r.headers.get("content-type", "")
                         if "text/html" in content_type or r.text[:15].lower().startswith(("<!doctype", "<html")):
-                            await notify_expired_cookies_async("kinozal")
+                            await notify_expired_cookies("kinozal")
                             raise KinozalForbiddenError(
                                 "kinozal.me вернул HTML вместо торрента. Сессия не восстановилась. "
                                 "Обновите cookies вручную."
                             )
                     except KinozalAuthError as e:
-                        await notify_expired_cookies_async("kinozal")
+                        await notify_expired_cookies("kinozal")
                         raise KinozalForbiddenError(f"Не удалось перелогиниться: {e}")
                 else:
-                    await notify_expired_cookies_async("kinozal")
+                    await notify_expired_cookies("kinozal")
                     raise KinozalForbiddenError(
                         "kinozal.me вернул HTML вместо торрента. Сессия истекла. "
                         "Настройте логин/пароль или обновите cookies."
                     )
 
             if r.status_code == 403:
-                await notify_expired_cookies_async("kinozal")
+                await notify_expired_cookies("kinozal")
                 raise KinozalForbiddenError("403 Forbidden при скачивании торрента")
             if r.status_code != 200:
                 raise KinozalError(f"HTTP {r.status_code} при скачивании торрента")

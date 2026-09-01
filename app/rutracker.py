@@ -4,7 +4,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from .core import get_proxy_url
-from .notify import notify_expired_cookies_async
+from .notify import notify_expired_cookies
 
 
 class RutrackerError(Exception):
@@ -64,13 +64,13 @@ class RutrackerClient:
             r = await client.get(f"{self.BASE_URL}/viewtopic.php?t={torrent_id}",
                                  headers=self._headers(), cookies=effective_cookies)
             if r.status_code == 403:
-                await notify_expired_cookies_async("rutracker")
+                await notify_expired_cookies("rutracker")
                 raise RutrackerForbiddenError("403 Forbidden — обновите cookies rutracker.org")
             if r.status_code != 200:
                 raise RutrackerError(f"HTTP {r.status_code}")
 
             if "login.php" in str(r.url) or "Вход" in r.text[:2000]:
-                await notify_expired_cookies_async("rutracker")
+                await notify_expired_cookies("rutracker")
                 raise RutrackerForbiddenError("Сессия истекла — обновите cookies rutracker.org")
 
             soup = BeautifulSoup(r.text, "html.parser")
@@ -107,23 +107,23 @@ class RutrackerClient:
                                              headers=self._headers(), cookies=new_cookies, follow_redirects=True)
                         content_type = r.headers.get("content-type", "")
                         if "text/html" in content_type or "login" in str(r.url).lower():
-                            await notify_expired_cookies_async("rutracker")
+                            await notify_expired_cookies("rutracker")
                             raise RutrackerForbiddenError(
                                 "rutracker.org вернул HTML вместо торрента. Сессия не восстановилась. "
                                 "Обновите cookies вручную."
                             )
                     except RutrackerAuthError as e:
-                        await notify_expired_cookies_async("rutracker")
+                        await notify_expired_cookies("rutracker")
                         raise RutrackerForbiddenError(f"Не удалось перелогиниться: {e}")
                 else:
-                    await notify_expired_cookies_async("rutracker")
+                    await notify_expired_cookies("rutracker")
                     raise RutrackerForbiddenError(
                         "rutracker.org вернул HTML вместо торрента. Сессия истекла. "
                         "Настройте логин/пароль или обновите cookies."
                     )
 
             if r.status_code == 403:
-                await notify_expired_cookies_async("rutracker")
+                await notify_expired_cookies("rutracker")
                 raise RutrackerForbiddenError("403 Forbidden при скачивании торрента")
             if r.status_code != 200:
                 raise RutrackerError(f"HTTP {r.status_code} при скачивании торрента")
