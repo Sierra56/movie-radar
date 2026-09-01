@@ -66,6 +66,7 @@ class KinozalClient:
             r = await client.get(f"{self.BASE_URL}/my.php", headers=self._headers(), cookies=cookies)
             if r.status_code == 200 and "my.php" in str(r.url):
                 return True, None
+            await notify_expired_cookies("kinozal")
             return False, f"HTTP {r.status_code}, redirect to {r.url}"
 
     @staticmethod
