@@ -34,17 +34,19 @@ def _is_enabled(event_type: str) -> bool:
     return bool(settings.get(f"notify_{event_type}", False))
 
 
-def notify_date_change(title: str, old_date: str, new_date: str, external_id: str):
-    if not _is_enabled("date_change"):
+# ── Основные уведомления ──
+
+def notify_date_changes(changes: list):
+    """Уведомление о нескольких изменениях дат."""
+    if not _is_enabled("date_change") or not changes:
         return
-    text = (
-        f"📅 <b>Дата выхода изменилась</b>\n\n"
-        f"<b>{html.escape(title)}</b>\n"
-        f"Было: {old_date}\n"
-        f"Стало: {new_date}\n\n"
-        f"🔗 <a href='{external_id}'>Подробнее</a>"
-    )
-    _send_message(text)
+    lines = ["📅 <b>Изменения дат выхода</b>\n"]
+    for c in changes[:10]:
+        title = c.get("title", "")
+        old_date = c.get("old_date", "—")
+        new_date = c.get("new_date", "—")
+        lines.append(f"• <b>{html.escape(title)}</b>\n  Было: {old_date}\n  Стало: {new_date}")
+    _send_message("\n".join(lines))
 
 
 def notify_new_title(title: str, year: Optional[int], external_id: str):
@@ -71,16 +73,18 @@ def notify_new_season(title: str, season_number: int, external_id: str):
     _send_message(text)
 
 
-def notify_new_episode(title: str, season: int, episode: int, episode_name: str, external_id: str):
-    if not _is_enabled("new_episode"):
+def notify_new_episodes(title: str, episodes: list, external_id: str):
+    """Уведомление о нескольких новых эпизодах."""
+    if not _is_enabled("new_episode") or not episodes:
         return
-    text = (
-        f"🎬 <b>Новый эпизод</b>\n\n"
-        f"<b>{html.escape(title)}</b>\n"
-        f"S{season:02d}E{episode:02d} — {html.escape(episode_name)}\n\n"
-        f"🔗 <a href='{external_id}'>Открыть</a>"
-    )
-    _send_message(text)
+    lines = [f"🎬 <b>Новые эпизоды</b>\n\n<b>{html.escape(title)}</b>\n"]
+    for ep in episodes[:10]:
+        season = ep.get("season", 0)
+        episode = ep.get("episode", 0)
+        name = ep.get("name", "")
+        lines.append(f"• S{season:02d}E{episode:02d} — {html.escape(name)}")
+    lines.append(f"\n🔗 <a href='{external_id}'>Открыть</a>")
+    _send_message("\n".join(lines))
 
 
 def notify_download_started(title: str, external_id: str):
@@ -152,8 +156,10 @@ def send_test_message() -> bool:
     return _send_message("🧪 <b>Тестовое сообщение</b>\n\nУведомления работают!")
 
 
-async def notify_date_change_async(*args, **kwargs):
-    await asyncio.to_thread(notify_date_change, *args, **kwargs)
+# ── Асинхронные обёртки ──
+
+async def notify_date_changes_async(*args, **kwargs):
+    await asyncio.to_thread(notify_date_changes, *args, **kwargs)
 
 
 async def notify_new_title_async(*args, **kwargs):
@@ -164,8 +170,8 @@ async def notify_new_season_async(*args, **kwargs):
     await asyncio.to_thread(notify_new_season, *args, **kwargs)
 
 
-async def notify_new_episode_async(*args, **kwargs):
-    await asyncio.to_thread(notify_new_episode, *args, **kwargs)
+async def notify_new_episodes_async(*args, **kwargs):
+    await asyncio.to_thread(notify_new_episodes, *args, **kwargs)
 
 
 async def notify_download_started_async(*args, **kwargs):
