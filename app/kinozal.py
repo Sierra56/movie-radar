@@ -1,9 +1,8 @@
 import re
-from typing import Optional
-
-import httpx
+from curl_cffi import requests as cffi_requests
 
 from .core import get_proxy_url
+from .notify import notify_expired_cookies_async
 
 
 class KinozalError(Exception):
@@ -20,27 +19,64 @@ class KinozalForbiddenError(KinozalError):
 
 class KinozalClient:
     BASE_URL = "https://kinozal.me"
+    # Имитируем реальный браузер, чтобы пройти проверку Cloudflare
+    IMPERSONATE = "chrome110"
 
     def __init__(self, username="", password="", proxy=None, cookies=None, user_agent=""):
         self.username = username or ""
         self.password = password or ""
         self.proxy = proxy
         self.cookies = cookies or {}
-        self.user_agent = user_agent or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        self.user_agent = user_agent  # не используем — curl_cffi подставит свой
 
-    def _headers(self):
-        h = {"User-Agent": self.user_agent, "Referer": self.BASE_URL}
-        if self.cookies:
-            h["Cookie"] = "; ".join(f"{k}={v}" for k, v in self.cookies.items())
-        return h
+    def _session(self):
+        """Создаёт сессию с имитацией браузера."""
+        return cffi_requests.Session(impersonate=self.IMPERSONATE)
+
+    def _get(self, session, url, cookies=None, headers=None, timeout=30):
+        """GET-запрос с куками (включая cf_clearance)."""
+        effective_cookies = cookies if cookies is not None else self.cookies
+        return session.get(
+            url,
+            cookies=effective_cookies,
+            headers=headers or {},
+            proxy=get_proxy_url(),
+            timeout=timeout,
+            allow_redirects=True,
+        )
+
+    def _save_dump(self, torrent_id: str, suffix: str, content: str):
+        try:
+            path = f"/data/debug_kinozal_{torrent_id}_{suffix}.html"
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+        except Exception as e:
+            print(f"[kinozal] не удалось сохранить дамп: {e}")
+
+    def _check_cloudflare(self, response) -> bool:
+        """Проверяет, не вернул ли Cloudflare челлендж."""
+        if response.status_code == 403:
+            return True
+        text = response.text[:2000].lower()
+        if "cf-challenge" in text or "just a moment" in text or "checking your browser" in text:
+            return True
+        return False
 
     async def login(self) -> dict:
         if not self.username or not self.password:
             raise KinozalAuthError("Не указаны логин/пароль для kinozal.me")
-        async with httpx.AsyncClient(proxy=get_proxy_url(), timeout=30, follow_redirects=True) as client:
-            r = await client.post(f"{self.BASE_URL}/takelogin.php", data={
-                "username": self.username, "password": self.password, "returnto": ""
-            }, headers={"User-Agent": self.user_agent})
+        with self._session() as session:
+            r = session.post(
+                f"{self.BASE_URL}/takelogin.php",
+                data={"username": self.username, "password": self.password, "returnto": ""},
+                proxy=get_proxy_url(),
+                timeout=30,
+                allow_redirects=True,
+            )
+            if self._check_cloudflare(r):
+                raise KinozalForbiddenError(
+                    "Cloudflare заблокировал вход. Обновите cookies из браузера."
+                )
             if r.status_code != 200:
                 raise KinozalAuthError(f"HTTP {r.status_code} при входе")
             cookies = dict(r.cookies)
@@ -49,120 +85,27 @@ class KinozalClient:
             return cookies
 
     async def validate_cookies(self, cookies: dict) -> tuple:
-        async with httpx.AsyncClient(proxy=get_proxy_url(), timeout=30) as client:
-            r = await client.get(f"{self.BASE_URL}/my.php", headers=self._headers(), cookies=cookies)
+        with self._session() as session:
+            r = self._get(session, f"{self.BASE_URL}/my.php", cookies=cookies)
+            if self._check_cloudflare(r):
+                return False, "Cloudflare заблокировал запрос — обновите cookies"
             if r.status_code == 200 and "my.php" in str(r.url):
                 return True, None
             return False, f"HTTP {r.status_code}, redirect to {r.url}"
 
-    async def fetch_files(self, torrent_id: str, cookies: dict = None) -> list:
-        """Получает список файлов раздачи через AJAX-эндпоинт."""
-        effective_cookies = cookies if cookies is not None else self.cookies
-        
-        # Сначала проверяем доступность основной страницы (сессия)
-        async with httpx.AsyncClient(proxy=get_proxy_url(), timeout=30) as client:
-            r = await client.get(f"{self.BASE_URL}/details.php?id={torrent_id}",
-                                 headers=self._headers(), cookies=effective_cookies)
-            if r.status_code == 403:
-                raise KinozalForbiddenError("403 Forbidden")
-            if r.status_code != 200:
-                raise KinozalError(f"HTTP {r.status_code}")
-            
-            # Список файлов загружается отдельным AJAX-запросом
-            # get_srv_details.php?id=X&action=2 возвращает HTML со списком файлов
-            details_url = f"{self.BASE_URL}/get_srv_details.php?id={torrent_id}&action=2"
-            r = await client.get(details_url, headers={
-                **self._headers(),
-                "Referer": f"{self.BASE_URL}/details.php?id={torrent_id}",
-                "X-Requested-With": "XMLHttpRequest",
-            }, cookies=effective_cookies)
-            
-            if r.status_code != 200:
-                raise KinozalError(f"HTTP {r.status_code} при получении списка файлов")
-            
-            # Явно указываем кодировку windows-1251 (не UTF-8!)
-            r.encoding = "cp1251"
-            html = r.text
-            
-            files = []
-            
-            # Парсим строки таблицы вида: <tr class='float'><td class='s'>имя.mkv</td><td class='s'>размер</td>...
-            # Или строки с файлами в таблице без класса float
-            for m in re.finditer(
-                r'<tr[^>]*>\s*<td[^>]*>([^<]+?)</td>\s*<td[^>]*>([\d.]+\s*[КMГT]Б)</td>',
-                html, re.IGNORECASE | re.DOTALL
-            ):
-                name = m.group(1).strip()
-                size = self._parse_size(m.group(2).strip())
-                # Фильтруем только файлы с расширениями медиа
-                if any(name.lower().endswith(ext) for ext in ('.mkv', '.mp4', '.avi', '.ts', '.m2ts', '.srt', '.sub', '.idx', '.nfo', '.jpg')):
-                    files.append({"name": name, "size": size, "url": ""})
-            
-            # Fallback: ищем в основной странице, если AJAX не сработал
-            if not files:
-                r2 = await client.get(f"{self.BASE_URL}/details.php?id={torrent_id}",
-                                      headers=self._headers(), cookies=effective_cookies)
-                r2.encoding = "cp1251"
-                html2 = r2.text
-                
-                # Сохраняем дамп для диагностики
-                try:
-                    with open(f"/data/debug_kinozal_{torrent_id}.html", "w", encoding="utf-8") as f:
-                        f.write(html2)
-                except Exception:
-                    pass
-                
-                # Ищем файлы в "Содержании" — обычно идут списком с расширением .mkv
-                for m in re.finditer(r'([A-Za-zА-Яа-я0-9_\-\.\s\(\)]+\.(?:mkv|mp4|avi|ts|m2ts))\s+([\d.]+\s*[КMГT]Б)', html2, re.IGNORECASE):
-                    name = m.group(1).strip()
-                    size = self._parse_size(m.group(2).strip())
-                    files.append({"name": name, "size": size, "url": ""})
-            
-            return files
-
-    async def download_torrent(self, torrent_id: str, cookies: dict = None) -> bytes:
-        effective_cookies = cookies if cookies is not None else self.cookies
-        async with httpx.AsyncClient(proxy=get_proxy_url(), timeout=60) as client:
-            r = await client.get(f"{self.BASE_URL}/download.php?id={torrent_id}",
-                                 headers=self._headers(), cookies=effective_cookies, follow_redirects=True)
-            
-            # Проверяем, что получили торрент, а не HTML
-            content_type = r.headers.get("content-type", "")
-            if "text/html" in content_type or r.text.strip().startswith("<!DOCTYPE") or r.text.strip().startswith("<html"):
-                # Получили HTML вместо торрента — сессия протухла
-                # Пытаемся перелогиниться один раз
-                if self.username and self.password:
-                    try:
-                        new_cookies = await self.login()
-                        r = await client.get(f"{self.BASE_URL}/download.php?id={torrent_id}",
-                                             headers=self._headers(), cookies=new_cookies, follow_redirects=True)
-                        content_type = r.headers.get("content-type", "")
-                        if "text/html" in content_type or r.text.strip().startswith("<!DOCTYPE") or r.text.strip().startswith("<html"):
-                            raise KinozalForbiddenError(
-                                "kinozal.me вернул HTML вместо торрента. Сессия не восстановилась. "
-                                "Обновите cookies вручную или войдите через браузер."
-                            )
-                    except KinozalAuthError as e:
-                        raise KinozalForbiddenError(f"Не удалось перелогиниться: {e}")
-                else:
-                    raise KinozalForbiddenError(
-                        "kinozal.me вернул HTML вместо торрента. Сессия истекла. "
-                        "Настройте логин/пароль или обновите cookies."
-                    )
-            
-            if r.status_code == 403:
-                raise KinozalForbiddenError("403 Forbidden при скачивании торрента")
-            if r.status_code != 200:
-                raise KinozalError(f"HTTP {r.status_code} при скачивании торрента")
-            
-            return r.content
+    @staticmethod
+    def _is_media_file(name: str) -> bool:
+        lower = name.lower()
+        return any(lower.endswith(ext) for ext in (
+            '.mkv', '.mp4', '.avi', '.ts', '.m2ts', '.srt', '.sub', '.idx', '.nfo', '.jpg', '.png'
+        ))
 
     def _parse_size(self, size_str: str) -> int:
-        # Поддержка и кириллических (КБ, МБ, ГБ), и латинских (КБ, МБ, ГБ) сокращений
-        m = re.match(r"([\d.]+)\s*([КMГT])Б", size_str)
+        s = size_str.replace(",", ".").replace(" ", "")
+        m = re.match(r"([\d.]+)\s*([КMГTKMGT])Б?", s, re.IGNORECASE)
         if not m:
             return 0
-        num, unit = float(m.group(1)), m.group(2)
+        num, unit = float(m.group(1)), m.group(2).upper()
         if unit == "К":
             return int(num * 1024)
         if unit == "M":
@@ -172,3 +115,107 @@ class KinozalClient:
         if unit in ("Т", "T"):
             return int(num * 1024 * 1024 * 1024 * 1024)
         return 0
+
+    def _parse_files_from_html(self, html_text: str) -> list:
+        files = []
+        seen = set()
+        # Вариант 1: таблица <tr><td>имя</td><td>размер</td></tr>
+        for m in re.finditer(
+            r'<tr[^>]*>\s*<td[^>]*>([^<]+?)</td>\s*<td[^>]*>([\d.,]+\s*[КMГTKMGT]Б?)</td>',
+            html_text, re.IGNORECASE | re.DOTALL
+        ):
+            name = m.group(1).strip()
+            size = self._parse_size(m.group(2).strip())
+            if self._is_media_file(name) and name not in seen:
+                seen.add(name)
+                files.append({"name": name, "size": size, "url": ""})
+        # Вариант 2: имя файла + размер в одной строке
+        for m in re.finditer(
+            r'([A-Za-zА-Яа-яЁё0-9_\-\.\s\(\)\[\]&]+?\.(?:mkv|mp4|avi|ts|m2ts|srt|sub|idx|nfo|jpg))\s*(?:[\(\[])?\s*([\d.,]+)\s*([КMГTKMGT])Б',
+            html_text, re.IGNORECASE
+        ):
+            name = m.group(1).strip()
+            size_str = m.group(2) + " " + m.group(3) + "Б"
+            size = self._parse_size(size_str)
+            if name not in seen:
+                seen.add(name)
+                files.append({"name": name, "size": size, "url": ""})
+        return files
+
+    async def fetch_files(self, torrent_id: str, cookies: dict = None) -> list:
+        effective_cookies = cookies if cookies is not None else self.cookies
+
+        with self._session() as session:
+            # 1. Проверяем основную страницу (сессия + Cloudflare)
+            r = self._get(session, f"{self.BASE_URL}/details.php?id={torrent_id}", cookies=effective_cookies)
+            if self._check_cloudflare(r):
+                await notify_expired_cookies_async("kinozal")
+                raise KinozalForbiddenError(
+                    "Cloudflare заблокировал запрос. Обновите cookies из браузера."
+                )
+            if r.status_code == 403:
+                await notify_expired_cookies_async("kinozal")
+                raise KinozalForbiddenError("403 Forbidden — обновите cookies kinozal.me")
+            if r.status_code != 200:
+                raise KinozalError(f"HTTP {r.status_code} при загрузке details.php")
+
+            # 2. Список файлов через AJAX-эндпоинт
+            details_url = f"{self.BASE_URL}/get_srv_details.php?id={torrent_id}&action=2"
+            r = self._get(session, details_url, cookies=effective_cookies, headers={
+                "Referer": f"{self.BASE_URL}/details.php?id={torrent_id}",
+                "X-Requested-With": "XMLHttpRequest",
+            })
+
+            if self._check_cloudflare(r):
+                await notify_expired_cookies_async("kinozal")
+                raise KinozalForbiddenError("Cloudflare заблокировал запрос списка файлов")
+            if r.status_code == 403:
+                await notify_expired_cookies_async("kinozal")
+                raise KinozalForbiddenError("403 Forbidden при получении списка файлов")
+            if r.status_code != 200:
+                raise KinozalError(f"HTTP {r.status_code} при получении списка файлов")
+
+            # Явно указываем кодировку ДО чтения текста
+            r.encoding = "cp1251"
+            ajax_html = r.text
+            self._save_dump(torrent_id, "ajax", ajax_html)
+
+            files = self._parse_files_from_html(ajax_html)
+
+            # 3. Fallback — основная страница
+            if not files:
+                r_main = self._get(session, f"{self.BASE_URL}/details.php?id={torrent_id}", cookies=effective_cookies)
+                r_main.encoding = "cp1251"
+                main_html = r_main.text
+                self._save_dump(torrent_id, "main", main_html)
+                files = self._parse_files_from_html(main_html)
+
+            return files
+
+    async def download_torrent(self, torrent_id: str, cookies: dict = None) -> bytes:
+        effective_cookies = cookies if cookies is not None else self.cookies
+
+        with self._session() as session:
+            r = self._get(session, f"{self.BASE_URL}/download.php?id={torrent_id}",
+                          cookies=effective_cookies, timeout=60)
+
+            if self._check_cloudflare(r):
+                await notify_expired_cookies_async("kinozal")
+                raise KinozalForbiddenError("Cloudflare заблокировал скачивание — обновите cookies")
+
+            content_type = r.headers.get("content-type", "")
+            body_start = r.text[:15].lower() if r.text else ""
+            if "text/html" in content_type or body_start.startswith(("<!doctype", "<html")):
+                await notify_expired_cookies_async("kinozal")
+                raise KinozalForbiddenError(
+                    "kinozal.me вернул HTML вместо торрента. Сессия истекла. "
+                    "Обновите cookies из браузера."
+                )
+
+            if r.status_code == 403:
+                await notify_expired_cookies_async("kinozal")
+                raise KinozalForbiddenError("403 Forbidden при скачивании торрента")
+            if r.status_code != 200:
+                raise KinozalError(f"HTTP {r.status_code} при скачивании торрента")
+
+            return r.content
