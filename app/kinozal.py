@@ -76,6 +76,78 @@ class KinozalClient:
             '.mkv', '.mp4', '.avi', '.ts', '.m2ts', '.srt', '.sub', '.idx', '.nfo', '.jpg', '.png'
         ))
 
+    def _parse_ajax_response(self, text: str) -> list:
+        """Парсит AJAX-ответ kinozal.
+
+        Формат (plain text, НЕ HTML):
+          Инфо хеш: EBE5D2DB...
+          Размер части торрента: 8 МБ
+          The.Walking.Dead.2026.S03.WEB-DL.1080p
+          The.Walking.Dead.2026.S03E01.mkv 2.82 ГБ (3027386396)
+          The.Walking.Dead.2026.S03E02.mkv 2.5 ГБ (2684016255)
+          ...
+
+        Парсим построчно: ищем строки вида
+            <имя.mkv> ... (<число_байт>)
+        Размер читаем из скобок (байты) — он не зависит от кодировки.
+        Имена файлов — на латинице, поэтому тоже устойчивы к проблемам с cp1251/UTF-8.
+        """
+        files = []
+        seen = set()
+
+        # Разбиваем на строки (AJAX — plain text)
+        for line in text.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+
+            # Ищем строку вида: <имя_с_расширением> ... (<число>)
+            # Имя файла — на латинице, цифры, точки, подчёркивания, дефисы, пробелы, скобки
+            m = re.match(
+                r'^([A-Za-z0-9_\-\.\(\)\[\] ]+?\.(?:mkv|mp4|avi|ts|m2ts|srt|sub|idx|nfo|jpg|png))'
+                r'.*?\((\d+)\)\s*$',
+                line,
+                re.IGNORECASE
+            )
+            if not m:
+                continue
+
+            name = m.group(1).strip()
+            try:
+                size_bytes = int(m.group(2))
+            except ValueError:
+                continue
+
+            # Отсеиваем возможные повторы
+            if name in seen:
+                continue
+            seen.add(name)
+
+            # Дополнительная защита — имя должно быть media-файлом
+            if not self._is_media_file(name):
+                continue
+
+            files.append({"name": name, "size": size_bytes, "url": ""})
+
+        return files
+
+    def _parse_html_files(self, html_text: str) -> list:
+        """Запасной парсер для HTML-ответа (если kinozal вдруг отдаёт HTML)."""
+        files = []
+        seen = set()
+
+        for m in re.finditer(
+            r'<tr[^>]*>\s*<td[^>]*>([^<]+?)</td>\s*<td[^>]*>([\d.,]+\s*[КMГTKMGT]Б?)</td>',
+            html_text, re.IGNORECASE | re.DOTALL
+        ):
+            name = m.group(1).strip()
+            size = self._parse_size(m.group(2).strip())
+            if self._is_media_file(name) and name not in seen:
+                seen.add(name)
+                files.append({"name": name, "size": size, "url": ""})
+
+        return files
+
     def _parse_size(self, size_str: str) -> int:
         s = size_str.replace(",", ".").replace(" ", "")
         m = re.match(r"([\d.]+)\s*([КMГTKMGT])Б?", s, re.IGNORECASE)
@@ -92,37 +164,11 @@ class KinozalClient:
             return int(num * 1024 * 1024 * 1024 * 1024)
         return 0
 
-    def _parse_files_from_html(self, html_text: str) -> list:
-        files = []
-        seen = set()
-
-        for m in re.finditer(
-            r'<tr[^>]*>\s*<td[^>]*>([^<]+?)</td>\s*<td[^>]*>([\d.,]+\s*[КMГTKMGT]Б?)</td>',
-            html_text, re.IGNORECASE | re.DOTALL
-        ):
-            name = m.group(1).strip()
-            size = self._parse_size(m.group(2).strip())
-            if self._is_media_file(name) and name not in seen:
-                seen.add(name)
-                files.append({"name": name, "size": size, "url": ""})
-
-        for m in re.finditer(
-            r'([A-Za-zА-Яа-яЁё0-9_\-\.\s\(\)\[\]&]+?\.(?:mkv|mp4|avi|ts|m2ts|srt|sub|idx|nfo|jpg))\s*(?:[\(\[])?\s*([\d.,]+)\s*([КMГTKMGT])Б',
-            html_text, re.IGNORECASE
-        ):
-            name = m.group(1).strip()
-            size_str = m.group(2) + " " + m.group(3) + "Б"
-            size = self._parse_size(size_str)
-            if name not in seen:
-                seen.add(name)
-                files.append({"name": name, "size": size, "url": ""})
-
-        return files
-
     async def fetch_files(self, torrent_id: str, cookies: dict = None) -> list:
         effective_cookies = cookies if cookies is not None else self.cookies
 
         async with httpx.AsyncClient(proxy=get_proxy_url(), timeout=30) as client:
+            # 1. Проверяем основную страницу (сессия)
             r = await client.get(f"{self.BASE_URL}/details.php?id={torrent_id}",
                                  headers=self._headers(), cookies=effective_cookies)
             if r.status_code == 403:
@@ -131,6 +177,7 @@ class KinozalClient:
             if r.status_code != 200:
                 raise KinozalError(f"HTTP {r.status_code} при загрузке details.php")
 
+            # 2. Список файлов через AJAX-эндпоинт (отдаёт plain text)
             details_url = f"{self.BASE_URL}/get_srv_details.php?id={torrent_id}&action=2"
             r = await client.get(details_url, headers={
                 **self._headers(),
@@ -144,19 +191,29 @@ class KinozalClient:
             if r.status_code != 200:
                 raise KinozalError(f"HTTP {r.status_code} при получении списка файлов")
 
-            r.encoding = "cp1251"
-            ajax_html = r.text
-            self._save_dump(torrent_id, "ajax", ajax_html)
+            # ВАЖНО: декодируем как cp1251 (кодировка kinozal),
+            # чтобы русские символы в именах не ломались.
+            # Имена файлов — на латинице, поэтому даже при ошибке парсинг сработает.
+            try:
+                ajax_text = r.content.decode("cp1251")
+            except UnicodeDecodeError:
+                ajax_text = r.text
 
-            files = self._parse_files_from_html(ajax_html)
+            self._save_dump(torrent_id, "ajax", ajax_text)
 
+            # Парсим plain text
+            files = self._parse_ajax_response(ajax_text)
+
+            # Fallback: если AJAX ничего не дал — пробуем основную страницу (HTML)
             if not files:
                 r_main = await client.get(f"{self.BASE_URL}/details.php?id={torrent_id}",
                                           headers=self._headers(), cookies=effective_cookies)
-                r_main.encoding = "cp1251"
-                main_html = r_main.text
+                try:
+                    main_html = r_main.content.decode("cp1251")
+                except UnicodeDecodeError:
+                    main_html = r_main.text
                 self._save_dump(torrent_id, "main", main_html)
-                files = self._parse_files_from_html(main_html)
+                files = self._parse_html_files(main_html)
 
             return files
 
