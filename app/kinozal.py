@@ -18,6 +18,34 @@ class KinozalForbiddenError(KinozalError):
     pass
 
 
+class KinozalCloudflareError(KinozalForbiddenError):
+    """Cloudflare включил защиту — нужен ручной обновление cookies из браузера."""
+    pass
+
+
+def parse_cookie_string(cookie_str: str) -> dict:
+    """Надёжный парсер строки cookies, скопированной из браузера.
+
+    Корректно обрабатывает:
+      - значения, содержащие '=' внутри (например, cf_clearance);
+      - произвольное число пар (uid, pass, cf_clearance, __cf_bm, ...);
+      - лишние пробелы и пустые фрагменты.
+    """
+    cookies = {}
+    if not cookie_str:
+        return cookies
+    for item in cookie_str.split(";"):
+        item = item.strip()
+        if not item or "=" not in item:
+            continue
+        key, _, value = item.partition("=")  # разбиваем только по ПЕРВОМУ '='
+        key = key.strip()
+        value = value.strip()
+        if key:
+            cookies[key] = value
+    return cookies
+
+
 class KinozalClient:
     BASE_URL = "https://kinozal.me"
 
@@ -25,7 +53,11 @@ class KinozalClient:
         self.username = username or ""
         self.password = password or ""
         self.proxy = proxy
-        self.cookies = cookies or {}
+        # cookies могут прийти как dict или как сырая строка из браузера
+        if isinstance(cookies, str):
+            self.cookies = parse_cookie_string(cookies)
+        else:
+            self.cookies = cookies or {}
         self.user_agent = user_agent or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
     def _headers(self):
@@ -36,6 +68,7 @@ class KinozalClient:
             "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
         }
         if self.cookies:
+            # передаём все cookies как есть, включая cf_clearance
             h["Cookie"] = "; ".join(f"{k}={v}" for k, v in self.cookies.items())
         return h
 
@@ -47,6 +80,32 @@ class KinozalClient:
         except Exception as e:
             print(f"[kinozal] не удалось сохранить дамп: {e}")
 
+    def _is_cloudflare_challenge(self, r) -> bool:
+        """Определяет, вернул ли kinozal страницу-челлендж Cloudflare."""
+        # Явные заголовки Cloudflare
+        if (r.headers.get("cf-mitigated") or "").lower() == "challenge":
+            return True
+        server = (r.headers.get("server") or "").lower()
+        # Страница челленджа обычно приходит со статусом 403/503
+        if r.status_code in (403, 503) and server == "cloudflare":
+            return True
+        # Проверка содержимого
+        try:
+            text = (r.text or "")[:3000].lower()
+        except Exception:
+            text = ""
+        markers = (
+            "just a moment",
+            "cf-chl",
+            "challenge-platform",
+            "checking your browser",
+            "attention required",
+            "cf-browser-verification",
+            "enable javascript and cookies",
+            "ray id",
+        )
+        return any(m in text for m in markers)
+
     async def login(self) -> dict:
         if not self.username or not self.password:
             raise KinozalAuthError("Не указаны логин/пароль для kinozal.me")
@@ -54,6 +113,10 @@ class KinozalClient:
             r = await client.post(f"{self.BASE_URL}/takelogin.php", data={
                 "username": self.username, "password": self.password, "returnto": ""
             }, headers={"User-Agent": self.user_agent})
+            if self._is_cloudflare_challenge(r):
+                raise KinozalCloudflareError(
+                    "Cloudflare заблокировал вход. Обновите cookies из браузера."
+                )
             if r.status_code != 200:
                 raise KinozalAuthError(f"HTTP {r.status_code} при входе")
             cookies = dict(r.cookies)
@@ -64,6 +127,9 @@ class KinozalClient:
     async def validate_cookies(self, cookies: dict) -> tuple:
         async with httpx.AsyncClient(proxy=get_proxy_url(), timeout=30) as client:
             r = await client.get(f"{self.BASE_URL}/my.php", headers=self._headers(), cookies=cookies)
+            if self._is_cloudflare_challenge(r):
+                await notify_expired_cookies("kinozal")
+                return False, "Cloudflare включил защиту — обновите cookies из браузера"
             if r.status_code == 200 and "my.php" in str(r.url):
                 return True, None
             await notify_expired_cookies("kinozal")
@@ -77,32 +143,25 @@ class KinozalClient:
         ))
 
     def _parse_ajax_response(self, text: str) -> list:
-        """Парсит AJAX-ответ kinozal.
+        """Парсит AJAX-ответ kinozal (plain text, НЕ HTML).
 
-        Формат (plain text, НЕ HTML):
+        Формат:
           Инфо хеш: EBE5D2DB...
           Размер части торрента: 8 МБ
           The.Walking.Dead.2026.S03.WEB-DL.1080p
           The.Walking.Dead.2026.S03E01.mkv 2.82 ГБ (3027386396)
-          The.Walking.Dead.2026.S03E02.mkv 2.5 ГБ (2684016255)
           ...
 
-        Парсим построчно: ищем строки вида
-            <имя.mkv> ... (<число_байт>)
-        Размер читаем из скобок (байты) — он не зависит от кодировки.
-        Имена файлов — на латинице, поэтому тоже устойчивы к проблемам с cp1251/UTF-8.
+        Размер берём из скобок (байты) — не зависит от кодировки.
+        Имена файлов — на латинице, устойчивы к проблемам cp1251/UTF-8.
         """
         files = []
         seen = set()
 
-        # Разбиваем на строки (AJAX — plain text)
         for line in text.split("\n"):
             line = line.strip()
             if not line:
                 continue
-
-            # Ищем строку вида: <имя_с_расширением> ... (<число>)
-            # Имя файла — на латинице, цифры, точки, подчёркивания, дефисы, пробелы, скобки
             m = re.match(
                 r'^([A-Za-z0-9_\-\.\(\)\[\] ]+?\.(?:mkv|mp4|avi|ts|m2ts|srt|sub|idx|nfo|jpg|png))'
                 r'.*?\((\d+)\)\s*$',
@@ -111,31 +170,24 @@ class KinozalClient:
             )
             if not m:
                 continue
-
             name = m.group(1).strip()
             try:
                 size_bytes = int(m.group(2))
             except ValueError:
                 continue
-
-            # Отсеиваем возможные повторы
             if name in seen:
                 continue
             seen.add(name)
-
-            # Дополнительная защита — имя должно быть media-файлом
             if not self._is_media_file(name):
                 continue
-
             files.append({"name": name, "size": size_bytes, "url": ""})
 
         return files
 
     def _parse_html_files(self, html_text: str) -> list:
-        """Запасной парсер для HTML-ответа (если kinozal вдруг отдаёт HTML)."""
+        """Запасной парсер на случай, если kinozal отдаёт список файлов как HTML."""
         files = []
         seen = set()
-
         for m in re.finditer(
             r'<tr[^>]*>\s*<td[^>]*>([^<]+?)</td>\s*<td[^>]*>([\d.,]+\s*[КMГTKMGT]Б?)</td>',
             html_text, re.IGNORECASE | re.DOTALL
@@ -145,7 +197,6 @@ class KinozalClient:
             if self._is_media_file(name) and name not in seen:
                 seen.add(name)
                 files.append({"name": name, "size": size, "url": ""})
-
         return files
 
     def _parse_size(self, size_str: str) -> int:
@@ -168,9 +219,14 @@ class KinozalClient:
         effective_cookies = cookies if cookies is not None else self.cookies
 
         async with httpx.AsyncClient(proxy=get_proxy_url(), timeout=30) as client:
-            # 1. Проверяем основную страницу (сессия)
+            # 1. Проверяем основную страницу (сессия + Cloudflare)
             r = await client.get(f"{self.BASE_URL}/details.php?id={torrent_id}",
                                  headers=self._headers(), cookies=effective_cookies)
+            if self._is_cloudflare_challenge(r):
+                await notify_expired_cookies("kinozal")
+                raise KinozalCloudflareError(
+                    "Cloudflare включил защиту. Обновите cookies из браузера."
+                )
             if r.status_code == 403:
                 await notify_expired_cookies("kinozal")
                 raise KinozalForbiddenError("403 Forbidden — обновите cookies kinozal.me")
@@ -185,23 +241,24 @@ class KinozalClient:
                 "X-Requested-With": "XMLHttpRequest",
             }, cookies=effective_cookies)
 
+            if self._is_cloudflare_challenge(r):
+                await notify_expired_cookies("kinozal")
+                raise KinozalCloudflareError(
+                    "Cloudflare включил защиту при получении списка файлов."
+                )
             if r.status_code == 403:
                 await notify_expired_cookies("kinozal")
                 raise KinozalForbiddenError("403 Forbidden при получении списка файлов")
             if r.status_code != 200:
                 raise KinozalError(f"HTTP {r.status_code} при получении списка файлов")
 
-            # ВАЖНО: декодируем как cp1251 (кодировка kinozal),
-            # чтобы русские символы в именах не ломались.
-            # Имена файлов — на латинице, поэтому даже при ошибке парсинг сработает.
+            # Декодируем как cp1251; при неудаче — fallback на стандартный текст.
             try:
                 ajax_text = r.content.decode("cp1251")
             except UnicodeDecodeError:
                 ajax_text = r.text
 
             self._save_dump(torrent_id, "ajax", ajax_text)
-
-            # Парсим plain text
             files = self._parse_ajax_response(ajax_text)
 
             # Fallback: если AJAX ничего не дал — пробуем основную страницу (HTML)
@@ -223,6 +280,13 @@ class KinozalClient:
             r = await client.get(f"{self.BASE_URL}/download.php?id={torrent_id}",
                                  headers=self._headers(), cookies=effective_cookies, follow_redirects=True)
 
+            # Cloudflare-челлендж: автологин не поможет, сразу уведомляем
+            if self._is_cloudflare_challenge(r):
+                await notify_expired_cookies("kinozal")
+                raise KinozalCloudflareError(
+                    "Cloudflare включил защиту при скачивании. Обновите cookies из браузера."
+                )
+
             content_type = r.headers.get("content-type", "")
             body_start = r.text[:15].lower() if r.text else ""
             if "text/html" in content_type or body_start.startswith(("<!doctype", "<html")):
@@ -238,6 +302,9 @@ class KinozalClient:
                                 "kinozal.me вернул HTML вместо торрента. Сессия не восстановилась. "
                                 "Обновите cookies вручную."
                             )
+                    except KinozalCloudflareError:
+                        await notify_expired_cookies("kinozal")
+                        raise
                     except KinozalAuthError as e:
                         await notify_expired_cookies("kinozal")
                         raise KinozalForbiddenError(f"Не удалось перелогиниться: {e}")
